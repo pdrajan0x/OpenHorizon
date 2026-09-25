@@ -3,19 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Racing</title>
+    <title>Neon Run</title>
     <link rel="icon" href="data:," />
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="hud">
-      <div id="laps">
-        <div><span class="label">LAP</span><span id="lap-current">0:00.000</span></div>
-        <div><span class="label">LAST</span><span id="lap-last">--</span></div>
-        <div><span class="label">BEST</span><span id="lap-best">--</span></div>
-      </div>
+      <div id="carname"></div>
       <div id="drift"><div id="drift-label">DRIFT</div><div id="drift-score"></div></div>
-      <div id="offroad">OFF ROAD</div>
+      <canvas id="minimap" width="220" height="220"></canvas>
       <div id="dash">
         <div id="speed"><span id="speed-value">0</span><span class="unit">km/h</span></div>
         <div id="boost"></div>
@@ -23,11 +19,11 @@
       <div id="help">
         <b>W / ↑</b> throttle &nbsp; <b>S / ↓</b> brake · reverse &nbsp; <b>A D / ← →</b> steer<br />
         <b>Space</b> handbrake — drift to fill boost &nbsp; <b>Shift</b> boost<br />
-        <b>C</b> camera &nbsp; <b>R</b> reset to road &nbsp; <b>F</b> FPS &nbsp; <b>H</b> hide help &nbsp; · gamepad works too
+        <b>1 2 3</b> switch car &nbsp; <b>C</b> camera &nbsp; <b>R</b> back to the road &nbsp; <b>F</b> FPS &nbsp; <b>H</b> hide help
       </div>
       <div id="fps"></div>
     </div>
-    <div id="loading">Loading…</div>
+    <div id="loading">BUILDING THE CITY…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

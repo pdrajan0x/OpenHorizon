@@ -1,5 +1,6 @@
-// Headless smoke test: boots the game in Chromium (software WebGL), drives it with the keyboard,
-// and checks the car settles, accelerates forward, steers the right way, and that drifting fills boost.
+// Headless smoke test on the NVIDIA GPU (falls back to software WebGL elsewhere). Part 1 drives the
+// car in the empty lot: settles, accelerates forward, steers the right way, drifting fills boost,
+// boost spends it, R resets. Part 2 loads the full city and checks traffic is alive and not crashing.
 // Usage: npm run smoke   (CHROMIUM=/path/to/chrome to override the browser, SHOTS_DIR for screenshots)
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -14,7 +15,8 @@ const url = server.resolvedUrls.local[0];
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM ?? '/usr/bin/chromium',
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  args: ['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
+  env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: '1' },
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
@@ -42,14 +44,14 @@ async function hold(keys, seconds, sample) {
 }
 
 try {
-  await page.goto(url);
+  await page.goto(`${url}?traffic=0&spawn=lot`);
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1.5, null, { timeout: 90_000 });
   const settled = await state();
   check('car settles on four wheels', settled.wheelsInContact === 4 && settled.upY > 0.95,
     `wheels=${settled.wheelsInContact} upY=${settled.upY.toFixed(3)}`);
   await page.screenshot({ path: `${shots}/start.png` });
 
-  const fast = await hold(['KeyW'], 4);
+  const fast = await hold(['KeyW'], 2.5);
   check('W accelerates forward', fast.forwardSpeed > 12, `forwardSpeed=${fast.forwardSpeed.toFixed(1)} m/s (${fast.speedKmh.toFixed(0)} km/h)`);
   await page.screenshot({ path: `${shots}/accelerating.png` });
 
@@ -85,7 +87,17 @@ try {
   await page.keyboard.press('KeyR');
   await page.waitForTimeout(300);
   const reset = await hold([], 1);
-  check('R resets onto the road, upright', !reset.offroad && reset.upY > 0.95, `offroad=${reset.offroad} upY=${reset.upY.toFixed(3)}`);
+  check('R puts the car back upright', reset.upY > 0.95 && reset.wheelsInContact === 4, `upY=${reset.upY.toFixed(3)} wheels=${reset.wheelsInContact}`);
+
+  // Part 2: the living city
+  await page.goto(url);
+  await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 10, null, { timeout: 90_000 });
+  const city = await state();
+  await page.screenshot({ path: `${shots}/city.png` });
+  check('traffic populates around the player', city.trafficActive >= 30, `${city.trafficActive} cars active`);
+  check('traffic is moving', city.trafficMoving >= 12 && city.trafficAvgSpeed > 4,
+    `${city.trafficMoving} moving, average ${(city.trafficAvgSpeed * 3.6).toFixed(0)} km/h`);
+  check('traffic does not crash on its own', city.trafficWrecked === 0, `${city.trafficWrecked} wrecked`);
 } catch (e) {
   errors.push(String(e));
 } finally {

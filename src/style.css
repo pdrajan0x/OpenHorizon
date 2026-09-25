@@ -4,7 +4,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #9cc8e8;
+  background: #0b0714;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #fff;
   user-select: none;
@@ -15,25 +15,18 @@ html, body {
 #loading {
   position: fixed; inset: 0;
   display: grid; place-items: center;
-  background: #0d1117; font-size: 20px; letter-spacing: 0.2em;
+  background: #0b0714; color: #ff2bd6; font-size: 20px; letter-spacing: 0.3em;
 }
 #loading.hidden { display: none; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; }
 #hud, #hud * { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
 
-.label { display: inline-block; width: 52px; opacity: 0.7; font-size: 12px; letter-spacing: 0.12em; }
-
-#laps {
-  position: absolute; top: 16px; left: 16px;
-  font: 600 18px/1.5 ui-monospace, "JetBrains Mono", monospace;
-}
-
 #dash {
   position: absolute; right: 24px; bottom: 20px;
   display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
 }
-#speed { font-style: italic; font-weight: 800; }
+#speed { font-style: italic; font-weight: 800; text-shadow: 0 0 14px rgba(0, 229, 255, 0.6); }
 #speed-value { font-size: 64px; font-variant-numeric: tabular-nums; }
 #speed .unit { font-size: 16px; margin-left: 6px; opacity: 0.8; }
 
@@ -55,16 +48,24 @@ html, body {
   opacity: 0; transition: opacity 0.15s;
 }
 #drift.show { opacity: 1; }
-#drift-label { font-size: 16px; letter-spacing: 0.3em; color: #7dd8ff; }
+#drift-label { font-size: 16px; letter-spacing: 0.3em; color: #ff2bd6; text-shadow: 0 0 10px #ff2bd6; }
 #drift-score { font-size: 40px; }
 #drift.banked #drift-label { color: #ffd166; }
 
-#offroad {
-  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
-  font-weight: 700; letter-spacing: 0.25em; color: #ffd166;
-  opacity: 0; transition: opacity 0.2s;
+#minimap {
+  position: absolute; left: 18px; bottom: 34px;
+  width: 220px; height: 220px;
+  filter: drop-shadow(0 0 10px rgba(0, 229, 255, 0.35));
 }
-#offroad.show { opacity: 0.9; }
+
+#carname {
+  position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+  text-align: center; font-style: italic; font-weight: 800; font-size: 34px; letter-spacing: 0.08em;
+  color: #fff; text-shadow: 0 0 18px #ff2bd6, 0 0 4px #ff2bd6;
+  opacity: 0; transition: opacity 0.4s;
+}
+#carname small { display: block; font-size: 13px; letter-spacing: 0.4em; color: #00e5ff; text-shadow: 0 0 8px #00e5ff; }
+#carname.show { opacity: 1; }
 
 #help {
   position: absolute; top: 16px; right: 16px;
@@ -76,7 +77,7 @@ html, body {
 #help.hidden { opacity: 0; }
 
 #fps {
-  position: absolute; left: 16px; bottom: 12px;
+  position: absolute; left: 18px; bottom: 10px;
   font: 12px ui-monospace, monospace; opacity: 0.75;
 }
 #fps.hidden { display: none; }

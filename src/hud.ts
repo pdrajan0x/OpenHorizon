@@ -1,9 +1,9 @@
 import type { Car } from './car';
 import { BOOST_SEGMENTS } from './drift';
-import type { LapTimer } from './laps';
 
-const HELP_SECONDS = 12;
+const HELP_SECONDS = 14;
 const BANKED_SECONDS = 1.5;
+const CAR_NAME_SECONDS = 2.5;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -12,14 +12,12 @@ export class Hud {
   private readonly boost = $('boost');
   private readonly drift = $('drift');
   private readonly driftScore = $('drift-score');
-  private readonly offroad = $('offroad');
-  private readonly lapCurrent = $('lap-current');
-  private readonly lapLast = $('lap-last');
-  private readonly lapBest = $('lap-best');
+  private readonly carName = $('carname');
   private readonly fps = $('fps');
   private readonly help = $('help');
   private readonly fills: HTMLElement[] = [];
   private helpTimer = HELP_SECONDS;
+  private carNameTimer = 0;
 
   constructor() {
     for (let i = 0; i < BOOST_SEGMENTS; i++) {
@@ -41,7 +39,12 @@ export class Hud {
     this.helpTimer = Infinity;
   }
 
-  update(dt: number, car: Car, laps: LapTimer, offroad: boolean, fpsText: string): void {
+  showCar(car: Car): void {
+    this.carName.innerHTML = `<small>${car.tuning.className}</small>${car.tuning.name}`;
+    this.carNameTimer = CAR_NAME_SECONDS;
+  }
+
+  update(dt: number, car: Car, fpsText: string): void {
     setText(this.speed, String(Math.round(car.speed * 3.6)));
 
     const d = car.drift;
@@ -56,13 +59,10 @@ export class Hud {
     this.drift.classList.toggle('show', d.drifting || banked);
     this.drift.classList.toggle('banked', banked);
     setText(this.driftScore, d.drifting ? String(Math.round(d.chainScore)) : `+${d.lastChainScore}`);
-
-    this.offroad.classList.toggle('show', offroad);
-    setText(this.lapCurrent, formatTime(laps.current));
-    setText(this.lapLast, formatTime(laps.last));
-    setText(this.lapBest, formatTime(laps.best));
     setText(this.fps, fpsText);
 
+    this.carNameTimer -= dt;
+    this.carName.classList.toggle('show', this.carNameTimer > 0);
     this.helpTimer -= dt;
     if (this.helpTimer <= 0) {
       this.help.classList.add('hidden');
@@ -73,10 +73,4 @@ export class Hud {
 
 function setText(el: HTMLElement, text: string): void {
   if (el.textContent !== text) el.textContent = text;
-}
-
-function formatTime(seconds: number | null): string {
-  if (seconds === null) return '--';
-  const m = Math.floor(seconds / 60);
-  return `${m}:${(seconds - m * 60).toFixed(3).padStart(6, '0')}`;
 }

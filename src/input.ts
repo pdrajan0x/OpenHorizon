@@ -13,6 +13,7 @@ export interface Actions {
   camera: boolean;
   fps: boolean;
   help: boolean;
+  car: number | null; // garage slot picked with the number keys
 }
 
 const KEYS = {
@@ -26,6 +27,7 @@ const KEYS = {
   camera: ['KeyC'],
   fps: ['KeyF'],
   help: ['KeyH'],
+  cars: ['Digit1', 'Digit2', 'Digit3'],
 };
 
 // Standard gamepad mapping
@@ -73,7 +75,9 @@ export class Input {
       camera: tapped(KEYS.camera),
       fps: tapped(KEYS.fps),
       help: tapped(KEYS.help),
+      car: KEYS.cars.findIndex((code) => this.pressed.has(code)),
     };
+    if (actions.car === -1) actions.car = null;
     this.pressed.clear();
 
     const pad = navigator.getGamepads?.().find((p) => p && p.connected);

@@ -24,7 +24,7 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 
 try {
   await page.goto(server.resolvedUrls.local[0]);
-  await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1, null, { timeout: 60_000 });
+  await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 2, null, { timeout: 90_000 });
   const gpu = await page.evaluate(() => {
     const gl = document.createElement('canvas').getContext('webgl2');
     const ext = gl?.getExtension('WEBGL_debug_renderer_info');
