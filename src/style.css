@@ -1,0 +1,82 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #9cc8e8;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+#game { display: block; width: 100vw; height: 100vh; }
+
+#loading {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: #0d1117; font-size: 20px; letter-spacing: 0.2em;
+}
+#loading.hidden { display: none; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud, #hud * { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+
+.label { display: inline-block; width: 52px; opacity: 0.7; font-size: 12px; letter-spacing: 0.12em; }
+
+#laps {
+  position: absolute; top: 16px; left: 16px;
+  font: 600 18px/1.5 ui-monospace, "JetBrains Mono", monospace;
+}
+
+#dash {
+  position: absolute; right: 24px; bottom: 20px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+}
+#speed { font-style: italic; font-weight: 800; }
+#speed-value { font-size: 64px; font-variant-numeric: tabular-nums; }
+#speed .unit { font-size: 16px; margin-left: 6px; opacity: 0.8; }
+
+#boost { display: flex; gap: 6px; }
+.seg {
+  width: 52px; height: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  transform: skewX(-20deg);
+  overflow: hidden;
+}
+.seg > i { display: block; height: 100%; width: 0%; background: #3fb6ff; }
+.seg.full > i { background: #7dd8ff; box-shadow: 0 0 8px #3fb6ff; }
+#boost.active .seg > i { background: #ff9a2e; box-shadow: 0 0 10px #ff6a00; }
+
+#drift {
+  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  text-align: center; font-style: italic; font-weight: 800;
+  opacity: 0; transition: opacity 0.15s;
+}
+#drift.show { opacity: 1; }
+#drift-label { font-size: 16px; letter-spacing: 0.3em; color: #7dd8ff; }
+#drift-score { font-size: 40px; }
+#drift.banked #drift-label { color: #ffd166; }
+
+#offroad {
+  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  font-weight: 700; letter-spacing: 0.25em; color: #ffd166;
+  opacity: 0; transition: opacity 0.2s;
+}
+#offroad.show { opacity: 0.9; }
+
+#help {
+  position: absolute; top: 16px; right: 16px;
+  max-width: 460px; padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.35); border-radius: 6px;
+  font-size: 13px; line-height: 1.7; text-align: right;
+  transition: opacity 0.6s;
+}
+#help.hidden { opacity: 0; }
+
+#fps {
+  position: absolute; left: 16px; bottom: 12px;
+  font: 12px ui-monospace, monospace; opacity: 0.75;
+}
+#fps.hidden { display: none; }
