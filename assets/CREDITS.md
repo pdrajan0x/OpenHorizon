@@ -28,23 +28,23 @@ rights holders).
 - [2012 Ford F150 SVT Raptor R [Add-On / Replace]](https://www.gta5-mods.com/vehicles/2012-ford-f150-svt-raptor) by [GOC]peng00820
 - [Mercedes Sprinter 211 CDI [Add-On / Replace | Template]](https://www.gta5-mods.com/vehicles/mercedes-sprinter-211-cdi-addon-replace-template) by ArmaniAdnr (base model by Ryuk)
 
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/toyota-corolla-2010-xei) by CristopherIgor
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2020-bmw-330i-g20-addon-gx_lover) by Gx_Lover
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2017-mercedes-benz-e300-4matic-w213-add-on-replace-ahmeda1999) by ahmeda1999
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/mercedes-benz-c-class-w205-2014-unlocked) by GloriusModding
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/volkswagen-golf-7-5r-2018-add-on) by VRSTNR MODDING TEAM
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/non-els-2020-ford-explorer) by NorthernScot
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/chevrolet-tahoe-add-on-replace) by AlexHIT
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/non-els-2017-chevrolet-silverado-4x4) by Discarded2003
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2023-nissan-altima-sr-vc-turbo-replace-add-on) by jrem7315 &amp; Lazlow
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/hyundai-sonata-limited-2020-add-on-replace-analog-digital-dials-1-3) by Lyn&#39;s
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2022-kia-k5-gt-1-0-replace-add-on) by jrem7315 &amp; Lazlow
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/london-levc-tx-taxi-replace-template) by NotchApple
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/man-lions-city-a37) by bozdemirt
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/ford-transit-extras-unlocked) by AuthorSaulAlan
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/toyota-comfort-hong-kong-taxi) by gudi17
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/keitora-custom-pack-add-on-tuning-template) by Silentm503
-- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/suzuki-swift-2021-add-on) by Markina991
+- [Toyota Corolla XEi 2010 sedan](https://www.gta5-mods.com/vehicles/toyota-corolla-2010-xei) by CristopherIgor
+- [BMW 330i (G20) 2020](https://www.gta5-mods.com/vehicles/2020-bmw-330i-g20-addon-gx_lover) by Gx_Lover
+- [Mercedes-Benz E300 4Matic (W213) 2017](https://www.gta5-mods.com/vehicles/2017-mercedes-benz-e300-4matic-w213-add-on-replace-ahmeda1999) by ahmeda1999
+- [Mercedes-Benz C-Class (W205) 2014](https://www.gta5-mods.com/vehicles/mercedes-benz-c-class-w205-2014-unlocked) by GloriusModding
+- [Volkswagen Golf 7.5 R 2018](https://www.gta5-mods.com/vehicles/volkswagen-golf-7-5r-2018-add-on) by VRSTNR MODDING TEAM
+- [Ford Explorer 2020 (civilian)](https://www.gta5-mods.com/vehicles/non-els-2020-ford-explorer) by NorthernScot
+- [Chevrolet Tahoe 2015](https://www.gta5-mods.com/vehicles/chevrolet-tahoe-add-on-replace) by AlexHIT
+- [Chevrolet Silverado 1500 4x4 2017 pickup](https://www.gta5-mods.com/vehicles/non-els-2017-chevrolet-silverado-4x4) by Discarded2003
+- [Nissan Altima SR VC-Turbo 2023](https://www.gta5-mods.com/vehicles/2023-nissan-altima-sr-vc-turbo-replace-add-on) by jrem7315 &amp; Lazlow
+- [Hyundai Sonata Limited 2020](https://www.gta5-mods.com/vehicles/hyundai-sonata-limited-2020-add-on-replace-analog-digital-dials-1-3) by Lyn&#39;s
+- [Kia K5 GT 2022](https://www.gta5-mods.com/vehicles/2022-kia-k5-gt-1-0-replace-add-on) by jrem7315 &amp; Lazlow
+- [LEVC TX London black cab](https://www.gta5-mods.com/vehicles/london-levc-tx-taxi-replace-template) by NotchApple
+- [MAN Lion's City A37 city bus](https://www.gta5-mods.com/vehicles/man-lions-city-a37) by bozdemirt
+- [Ford Transit van](https://www.gta5-mods.com/vehicles/ford-transit-extras-unlocked) by AuthorSaulAlan
+- [Toyota Crown Comfort (Hong Kong taxi)](https://www.gta5-mods.com/vehicles/toyota-comfort-hong-kong-taxi) by gudi17
+- [Japanese kei truck (keitora) custom pack](https://www.gta5-mods.com/vehicles/keitora-custom-pack-add-on-tuning-template) by Silentm503
+- [Suzuki Swift 2021 (compact)](https://www.gta5-mods.com/vehicles/suzuki-swift-2021-add-on) by Markina991
 
 ## Maps
 
@@ -58,6 +58,11 @@ rights holders).
 - [NFSU2 Bayview Map in GTA 5](https://www.gta5-mods.com/maps/nfsu2-map-in-gta-5) by Cesar Design, FV Mods (original content: EA Black Box)
 - [GTA: Dubai Islands [Add-on Map] (Standard V2.1)](https://www.gta5-mods.com/maps/dubai-islands-addonmap) by GTA Belgium
 - [Midnight Shuto](https://www.gta5-mods.com/maps/midnight-shuto) by FV Mods (original map: Bandai Namco Amusement)
+- [French Riviera V [Add-On SP]](https://www.gta5-mods.com/maps/french-riviera-v) by EncryptedReality
+- [Gostown Paradise V](https://www.gta5-mods.com/maps/gostown-paradise-v) by Terreur69 / Gostown Paradise team, port by EncryptedReality & ryanm2711
+- [Google Maps Zagreb V (textured T_1.0)](https://www.gta5-mods.com/maps/google-maps-zagreb-v) by EncryptedReality
+- [Akina [Add-On SP] (Initial D)](https://www.gta5-mods.com/maps/initiald-zero-akina) by AnLan (conversion); model from Assetto Corsa, original author unknown
+- [Tsukuba Fruit Line [Add-On SP / FiveM]](https://www.gta5-mods.com/maps/tsukuba-fruit-line-add-on-sp-fivem) by AnLan (conversion); model from Initial D Zero (Assetto Corsa)
 
 ## Street props and trees
 

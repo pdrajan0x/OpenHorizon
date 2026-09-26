@@ -1,13 +1,14 @@
 [
-  { "id": "chicago", "mod": "map-windy-city-chicago", "args": ["--cell", "250"] },
-  { "id": "miami", "mod": "map-sunshine-dream", "args": ["--cell", "250"] },
-  { "id": "shibuya", "mod": "map-shibuya", "args": [] },
-  { "id": "hong-kong", "mod": "map-hong-kong", "args": ["--cell", "250", "--crop", "400", "--road-tex", "^Diffuse_028$"] },
-  { "id": "monaco-gp", "mod": "map-monaco-gp", "args": ["--cell", "250", "--crop", "500", "--road-tex", "^(concrete_basic|asphalt_Base_Color|road_seamless|asphalt-new)$"] },
-  { "id": "tokyo-shinjuku", "mod": "map-tokyo-shinjuku", "args": ["--road-tex", "^(lanes_4_stripes_white_14x14m|asphalt_14x14m|_white_)$"] },
-  { "id": "nfsu2-bayview", "mod": "map-nfsu2-bayview", "args": ["--cell", "250", "--road-tex", "^(17063a6d|6d5d60eb|dd2c7871|b1193dfb|fd5ce073|78d71b5a|565da3fc|982c4824|e295c096)$"] },
-  { "id": "midnight-shuto", "mod": "map-midnight-shuto", "args": ["--cell", "250", "--crop", "600"] },
-  { "id": "fukuoka-expressway", "mod": "map-fukuoka-expressway", "args": [] },
-  { "id": "dubai-highway", "mod": "map-dubai-highway", "args": [] },
-  { "id": "dubai-islands", "mod": "map-dubai-islands", "args": ["--cell", "250", "--crop", "600"] }
+  {"id": "chicago", "mod": "map-windy-city-chicago", "args": ["--cell", "250"]},
+  {"id": "miami", "mod": "map-sunshine-dream", "args": ["--cell", "250"]},
+  {"id": "shibuya", "mod": "map-shibuya", "args": []},
+  {"id": "hong-kong", "mod": "map-hong-kong", "args": ["--cell", "250", "--crop", "400", "--road-tex", "^Diffuse_028$"]},
+  {"id": "monaco-gp", "mod": "map-monaco-gp", "args": ["--cell", "250", "--crop", "500", "--road-tex", "^(concrete_basic|asphalt_Base_Color|road_seamless|asphalt-new)$"]},
+  {"id": "tokyo-shinjuku", "mod": "map-tokyo-shinjuku", "args": ["--road-tex", "^(lanes_4_stripes_white_14x14m|asphalt_14x14m|_white_)$"]},
+  {"id": "nfsu2-bayview", "mod": "map-nfsu2-bayview", "args": ["--cell", "250", "--road-tex", "^(17063a6d|6d5d60eb|dd2c7871|b1193dfb|fd5ce073|78d71b5a|565da3fc|982c4824|e295c096)$"]},
+  {"id": "midnight-shuto", "mod": "map-midnight-shuto", "args": ["--cell", "250", "--crop", "600"]},
+  {"id": "fukuoka-expressway", "mod": "map-fukuoka-expressway", "args": []},
+  {"id": "dubai-highway", "mod": "map-dubai-highway", "args": []},
+  {"id": "dubai-islands", "mod": "map-dubai-islands", "args": ["--cell", "250", "--crop", "600"]},
+  {"id": "french-riviera", "mod": "map-french-riviera", "args": ["--cell", "250"]}
 ]
