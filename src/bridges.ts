@@ -1,191 +1,650 @@
-// Procedural bridges connecting islands: road deck geometry, collision, and road graph links.
-// Bridges span the water gaps between islands, connecting their road networks so you can drive
-// between any two cities without teleporting.
+// Causeways between the islands (HANDOFF plan B). Each link joins a gateway road node on one island to
+// one on another along a Hermite curve that leaves each end along its road's own direction. The deck
+// eases from each end's road height up to at least DECK_CLEARANCE over the sea, with a grade of
+// MAX_GRADE or less. What the car drives on is exact: a trimesh following the curve (deck + barrier
+// walls), and road-graph nodes every NODE_SPACING m joined to both gateways, so traffic, the GPS,
+// rivals and races all cross.
+//
+// What you see comes from real models where we have them (public/mods/bridges/kit.json, see Kit below):
+// deck pieces repeated along the curve, pillars down to the seabed, barriers along both edges, lamps.
+// Parts the kit lacks fall back to a textured ribbon (Poly Haven asphalt, concrete) built on the curve.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { STATIC_GROUPS } from './map';
 
-const BRIDGE_WIDTH = 18; // m, two lanes each way plus shoulders
-const BRIDGE_THICKNESS = 1.2; // m, deck depth
-const BRIDGE_Y = 8; // m above sea level
-const DECK_COLOR = 0x3a3a3a; // dark asphalt
-const RAIL_COLOR = 0x888888; // steel guardrails
-const RAIL_HEIGHT = 1.2;
-const RAIL_THICKNESS = 0.15;
+export const DECK_WIDTH = 18; // m: two 3.4 m lanes each way plus shoulders
+const DECK_CLEARANCE = 12; // m above the sea at least, away from the ends
+const MAX_GRADE = 0.06;
+const DECK_DEPTH = 1.6; // m of girder under the road surface
+const BARRIER_HEIGHT = 1.1; // m, the collision wall along each edge
+const NODE_SPACING = 25; // m between road-graph nodes on the deck
+const STEP = 4; // m between cross-sections of the deck geometry
+const PILLAR_SPACING = 48; // m
+const SEABED = -18; // m, where pillars end
+const MAX_LINK = 3600; // m: longer links only when nothing shorter reaches an island
+const MAX_ANY_LINK = 9000;
+const PIECE_CHUNK = 160; // m of bridge per instanced chunk, so frustum culling works
+const DETAIL_DISTANCE = 900; // m: barriers and lamps beyond this aren't drawn
 
-interface BridgeSegment {
-  from: THREE.Vector3;
-  to: THREE.Vector3;
+/**
+ * Optional kit of real models: public/mods/bridges/kit.json. Every part is optional; `model` is a
+ * path under /mods/. Sizes are measured from the model; `axis` is the model's length axis (default:
+ * its longest horizontal one). Deck pieces are scaled to DECK_WIDTH and their top put at the road.
+ */
+interface KitPart {
+  model: string;
+  axis?: 'x' | 'z';
+  /** Deck: the top of the road surface in model units, if not the bounding box top. */
+  top?: number;
+  /** Stretch along the length (barriers: fewer instances). */
+  stretch?: number;
+  /** Lamps: metres between them. */
+  spacing?: number;
+}
+interface Kit {
+  deck?: KitPart;
+  pillar?: KitPart;
+  barrier?: KitPart;
+  lamp?: KitPart;
+}
+const DEFAULT_KIT: Kit = {
+  barrier: { model: 'bridges/concrete_road_barrier_02.glb', stretch: 1.6 },
+  lamp: { model: 'bridges/street_lamp_01.glb', spacing: 60 },
+};
+
+interface LoadedPart {
+  meshes: { geometry: THREE.BufferGeometry; material: THREE.Material }[];
+  /** Length along the model's travel axis, width across, height, and its local min corner. */
+  length: number;
+  width: number;
+  height: number;
+  min: THREE.Vector3;
+  max: THREE.Vector3;
+  part: KitPart;
+}
+
+export interface IslandPlan {
+  /** Road nodes in world space and each node's links (other node, lanes out, lanes in). */
+  nodes: THREE.Vector3[];
+  adjacent: { other: number; lanes: number }[][];
+  /** Shore points in world space (outer loops). */
+  shore: [number, number][];
+  /** Land rectangle in world space [minX, minZ, maxX, maxZ]. */
+  rect: [number, number, number, number];
+  /** Index of this island's node 0 in the merged road graph. */
+  base: number;
+}
+
+export interface LinkPlan {
+  a: number; // island indices
+  b: number;
+  na: number; // node indices within each island
+  nb: number;
+  cost: number;
+  length: number;
+}
+
+interface Gateway {
+  node: number;
+  shoreDist: number;
+  deadEnd: boolean;
+  dir: THREE.Vector2 | null; // the road's direction out of a dead end
+}
+
+/** Road nodes near an island's shore that a causeway could leave from. */
+function gateways(island: IslandPlan): Gateway[] {
+  const grid = new Map<string, [number, number][]>();
+  const G = 200;
+  for (const p of island.shore) {
+    const k = `${Math.floor(p[0] / G)},${Math.floor(p[1] / G)}`;
+    let l = grid.get(k);
+    if (!l) grid.set(k, (l = []));
+    l.push(p);
+  }
+  const shoreDist = (x: number, z: number) => {
+    const cx = Math.floor(x / G);
+    const cz = Math.floor(z / G);
+    let best = Infinity;
+    for (let r = 0; r < 30; r++) {
+      for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
+        if (Math.max(Math.abs(i), Math.abs(j)) !== r) continue;
+        for (const p of grid.get(`${cx + i},${cz + j}`) ?? []) best = Math.min(best, Math.hypot(p[0] - x, p[1] - z));
+      }
+      if (best < r * G) break;
+    }
+    return best;
+  };
+  const all: Gateway[] = [];
+  island.nodes.forEach((n, i) => {
+    const adj = island.adjacent[i];
+    if (!adj.length || !adj.some((a) => a.lanes > 0)) return;
+    if (n.y < -1 || n.y > 60) return; // tunnels, and roads far above the sea
+    const deadEnd = adj.length === 1;
+    let dir: THREE.Vector2 | null = null;
+    if (deadEnd) {
+      const o = island.nodes[adj[0].other];
+      dir = new THREE.Vector2(n.x - o.x, n.z - o.z);
+      if (dir.lengthSq() < 1e-4) dir = null;
+      else dir.normalize();
+    }
+    all.push({ node: i, shoreDist: shoreDist(n.x, n.z), deadEnd, dir });
+  });
+  all.sort((p, q) => p.shoreDist - q.shoreDist);
+  const limit = (all[0]?.shoreDist ?? 0) + 350;
+  const near = all.filter((g) => g.shoreDist <= Math.max(limit, 250));
+  // Keep the count bounded, spread over the whole shore
+  const step = Math.max(1, Math.floor(near.length / 500));
+  return near.filter((_, k) => k % step === 0);
+}
+
+function segmentsCross(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): boolean {
+  const o = (p: THREE.Vector3, q: THREE.Vector3, r: THREE.Vector3) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+}
+
+/**
+ * Which islands to join, and where: a minimum spanning tree over the cheapest gateway pair of every
+ * two islands (so every city is reachable by road), plus a couple of extra links for loops.
+ */
+export function planLinks(islands: IslandPlan[], landAt: (x: number, z: number) => number, extra = 2): LinkPlan[] {
+  const gates = islands.map(gateways);
+  const pairs: LinkPlan[] = [];
+  for (let a = 0; a < islands.length; a++) {
+    for (let b = a + 1; b < islands.length; b++) {
+      let best: LinkPlan | null = null;
+      for (const ga of gates[a]) {
+        const pa = islands[a].nodes[ga.node];
+        for (const gb of gates[b]) {
+          const pb = islands[b].nodes[gb.node];
+          const dx = pb.x - pa.x;
+          const dz = pb.z - pa.z;
+          const length = Math.hypot(dx, dz);
+          if (length > MAX_ANY_LINK || length < 60) continue;
+          // Land to cross at each end costs more than sea; a dead end already pointing across is best
+          let cost = length + 1.5 * (ga.shoreDist + gb.shoreDist) + 8 * Math.abs(pa.y - pb.y);
+          const align = (g: Gateway, x: number, z: number) => (g.dir ? (g.dir.x * x + g.dir.y * z) / length : -0.2);
+          const alA = align(ga, dx, dz);
+          const alB = align(gb, -dx, -dz);
+          cost -= (Math.max(alA, 0) + Math.max(alB, 0)) * 120;
+          cost += (Math.max(-alA, 0) + Math.max(-alB, 0)) * 400; // a road pointing away would loop back
+          if (best && cost >= best.cost) continue;
+          best = { a, b, na: ga.node, nb: gb.node, cost, length };
+        }
+      }
+      if (!best) continue;
+      const pa = islands[a].nodes[best.na];
+      const pb = islands[b].nodes[best.nb];
+      // Not straight across a third island
+      let blocked = false;
+      for (let t = 0; t <= 1 && !blocked; t += 40 / best.length) {
+        const k = landAt(pa.x + (pb.x - pa.x) * t, pa.z + (pb.z - pa.z) * t);
+        blocked = k >= 0 && k !== a && k !== b;
+      }
+      if (!blocked) pairs.push(best);
+    }
+  }
+  pairs.sort((p, q) => p.cost - q.cost);
+  const parent = islands.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const chosen: LinkPlan[] = [];
+  const ends = (l: LinkPlan) => [islands[l.a].nodes[l.na], islands[l.b].nodes[l.nb]];
+  const crosses = (l: LinkPlan) => chosen.some((c) => {
+    const [p, q] = ends(l);
+    const [r, s] = ends(c);
+    return segmentsCross(p, q, r, s);
+  });
+  const rest: LinkPlan[] = [];
+  for (const p of pairs) {
+    const ra = find(p.a);
+    const rb = find(p.b);
+    if (ra === rb) { rest.push(p); continue; }
+    if (crosses(p)) { rest.push(p); continue; }
+    parent[ra] = rb;
+    chosen.push(p);
+  }
+  // Anything still cut off takes its cheapest link even if it crosses another
+  for (const p of rest) {
+    const ra = find(p.a);
+    const rb = find(p.b);
+    if (ra !== rb) { parent[ra] = rb; chosen.push(p); }
+  }
+  const longest = Math.max(...chosen.map((c) => c.length), 0);
+  let added = 0;
+  for (const p of rest) {
+    if (added >= extra) break;
+    if (chosen.includes(p) || p.length > Math.min(MAX_LINK, Math.max(longest, 1500)) || crosses(p)) continue;
+    // Loops are only worth it between islands with no direct link yet
+    if (chosen.some((c) => (c.a === p.a && c.b === p.b))) continue;
+    chosen.push(p);
+    added++;
+  }
+  return chosen;
+}
+
+/** A built link: its centerline and what the road graph needs. */
+export interface Bridge {
+  plan: LinkPlan;
+  /** Road-graph nodes on the deck, from end A to end B (not including the gateways). */
+  nodes: THREE.Vector3[];
+  length: number;
+}
+
+interface Frame {
+  p: THREE.Vector3; // deck centerline, road surface
+  t: THREE.Vector3; // unit tangent (with grade)
+  r: THREE.Vector3; // unit right, horizontal
+  s: number; // arc length
+}
+
+/** The deck centerline from A to B: Hermite curve in plan, eased height profile, sampled every STEP m. */
+function centerline(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2): Frame[] {
+  const L = Math.hypot(pb.x - pa.x, pb.z - pa.z);
+  const m = L * 0.75;
+  const plan: THREE.Vector2[] = [];
+  const N = Math.max(40, Math.ceil(L / 1.5));
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
+    const h10 = t ** 3 - 2 * t ** 2 + t;
+    const h01 = -2 * t ** 3 + 3 * t ** 2;
+    const h11 = t ** 3 - t ** 2;
+    plan.push(new THREE.Vector2(
+      h00 * pa.x + h10 * m * da.x + h01 * pb.x + h11 * m * db.x,
+      h00 * pa.z + h10 * m * da.y + h01 * pb.z + h11 * m * db.y,
+    ));
+  }
+  // Resample at even arc length
+  const cum = [0];
+  for (let i = 1; i < plan.length; i++) cum.push(cum[i - 1] + plan[i].distanceTo(plan[i - 1]));
+  const S = cum[cum.length - 1];
+  const n = Math.max(2, Math.ceil(S / STEP));
+  const pts: THREE.Vector2[] = [];
+  let j = 0;
+  for (let i = 0; i <= n; i++) {
+    const s = (S * i) / n;
+    while (j < cum.length - 2 && cum[j + 1] < s) j++;
+    const f = (s - cum[j]) / Math.max(1e-6, cum[j + 1] - cum[j]);
+    pts.push(plan[j].clone().lerp(plan[j + 1], f));
+  }
+  // Heights: aim for the deck clearance (or the straight line between ends if that's higher), within
+  // MAX_GRADE of both ends, then smooth
+  const ha = pa.y;
+  const hb = pb.y;
+  let ys = pts.map((_, i) => {
+    const s = (S * i) / n;
+    const target = Math.max(DECK_CLEARANCE, ha + ((hb - ha) * s) / S);
+    const lo = Math.max(ha - MAX_GRADE * s, hb - MAX_GRADE * (S - s));
+    const hi = Math.min(ha + MAX_GRADE * s, hb + MAX_GRADE * (S - s));
+    return lo > hi ? ha + ((hb - ha) * s) / S : THREE.MathUtils.clamp(target, lo, hi);
+  });
+  const w = Math.max(1, Math.round(40 / STEP));
+  for (let pass = 0; pass < 2; pass++) {
+    ys = ys.map((y, i) => {
+      if (i === 0 || i === ys.length - 1) return y;
+      const k = Math.min(w, i, ys.length - 1 - i);
+      let s = 0;
+      for (let d = -k; d <= k; d++) s += ys[i + d];
+      return s / (2 * k + 1);
+    });
+  }
+  const frames: Frame[] = pts.map((p, i) => ({
+    p: new THREE.Vector3(p.x, ys[i], p.y), t: new THREE.Vector3(), r: new THREE.Vector3(), s: (S * i) / n,
+  }));
+  frames.forEach((f, i) => {
+    const a = frames[Math.max(0, i - 1)].p;
+    const b = frames[Math.min(frames.length - 1, i + 1)].p;
+    f.t.subVectors(b, a).normalize();
+    f.r.set(-f.t.z, 0, f.t.x).normalize(); // right of travel: (-dz, dx)
+  });
+  return frames;
 }
 
 export class BridgeNetwork {
   readonly root = new THREE.Group();
-  private readonly colliders: RAPIER.Collider[] = [];
+  readonly bridges: Bridge[] = [];
+  private readonly detail: { mesh: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
 
-  constructor(
-    private readonly world: RAPIER.World,
-    scene: THREE.Scene,
-    segments: BridgeSegment[],
+  private constructor(
+    world: RAPIER.World,
+    islands: IslandPlan[],
+    plans: LinkPlan[],
+    private readonly kit: Partial<Record<keyof Kit, LoadedPart>>,
+    private readonly mats: { asphalt: THREE.Material; concrete: THREE.Material; paint: THREE.Material },
   ) {
     this.root.name = 'bridges';
-    for (const seg of segments) {
-      this.createBridge(seg.from, seg.to);
-    }
-    scene.add(this.root);
-  }
-
-  private createBridge(from: THREE.Vector3, to: THREE.Vector3): void {
-    const dir = new THREE.Vector3().subVectors(to, from);
-    const length = dir.length();
-    const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-    mid.y = BRIDGE_Y;
-
-    // Bridge deck: a flat box from->to at BRIDGE_Y
-    const deckGeom = new THREE.BoxGeometry(length, BRIDGE_THICKNESS, BRIDGE_WIDTH);
-    const deckMat = new THREE.MeshStandardMaterial({
-      color: DECK_COLOR,
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    const deck = new THREE.Mesh(deckGeom, deckMat);
-    deck.position.copy(mid);
-    deck.lookAt(to.x, mid.y, to.z);
-    deck.rotateY(Math.PI / 2);
-    this.root.add(deck);
-
-    // Collision: box collider for the deck
-    const rot = new THREE.Quaternion().setFromEuler(deck.rotation);
-    const deckDesc = RAPIER.ColliderDesc.cuboid(length / 2, BRIDGE_THICKNESS / 2, BRIDGE_WIDTH / 2)
-      .setTranslation(mid.x, mid.y, mid.z)
-      .setRotation(rot)
-      .setFriction(0.9)
-      .setCollisionGroups(STATIC_GROUPS);
-    this.colliders.push(this.world.createCollider(deckDesc));
-
-    // Guardrails on both sides
-    const railGeom = new THREE.BoxGeometry(length, RAIL_HEIGHT, RAIL_THICKNESS);
-    const railMat = new THREE.MeshStandardMaterial({
-      color: RAIL_COLOR,
-      roughness: 0.4,
-      metalness: 0.7,
-    });
-
-    for (const side of [-1, 1]) {
-      const rail = new THREE.Mesh(railGeom, railMat);
-      const offset = new THREE.Vector3(0, 0, side * (BRIDGE_WIDTH / 2 + RAIL_THICKNESS / 2));
-      offset.applyQuaternion(rot);
-      rail.position.copy(mid).add(offset);
-      rail.position.y += (BRIDGE_THICKNESS + RAIL_HEIGHT) / 2;
-      rail.lookAt(to.x, rail.position.y, to.z);
-      rail.rotateY(Math.PI / 2);
-      this.root.add(rail);
-
-      const railRot = new THREE.Quaternion().setFromEuler(rail.rotation);
-      const railDesc = RAPIER.ColliderDesc.cuboid(length / 2, RAIL_HEIGHT / 2, RAIL_THICKNESS / 2)
-        .setTranslation(rail.position.x, rail.position.y, rail.position.z)
-        .setRotation(railRot)
-        .setFriction(0.6)
-        .setCollisionGroups(STATIC_GROUPS);
-      this.colliders.push(this.world.createCollider(railDesc));
-    }
-
-    // Support pillars every 80m for long bridges
-    if (length > 100) {
-      const pillarSpacing = 80;
-      const pillarCount = Math.floor(length / pillarSpacing);
-      const pillarGeom = new THREE.CylinderGeometry(1.5, 2, BRIDGE_Y + BRIDGE_THICKNESS / 2, 8);
-      const pillarMat = new THREE.MeshStandardMaterial({
-        color: 0x606060,
-        roughness: 0.6,
-        metalness: 0.3,
-      });
-
-      for (let i = 1; i <= pillarCount; i++) {
-        const t = i / (pillarCount + 1);
-        const pos = new THREE.Vector3().lerpVectors(from, to, t);
-        pos.y = (BRIDGE_Y + BRIDGE_THICKNESS / 2) / 2;
-
-        const pillar = new THREE.Mesh(pillarGeom, pillarMat);
-        pillar.position.copy(pos);
-        this.root.add(pillar);
-
-        // Collision for pillar
-        const pillarDesc = RAPIER.ColliderDesc.cylinder((BRIDGE_Y + BRIDGE_THICKNESS / 2) / 2, 1.5)
-          .setTranslation(pos.x, pos.y, pos.z)
-          .setFriction(0.5)
-          .setCollisionGroups(STATIC_GROUPS);
-        this.colliders.push(this.world.createCollider(pillarDesc));
-      }
-    }
-  }
-
-  dispose(): void {
-    for (const c of this.colliders) {
-      this.world.removeCollider(c, false);
-    }
-    this.colliders.length = 0;
-    this.root.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) {
-        const mesh = o as THREE.Mesh;
-        mesh.geometry.dispose();
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((m) => m.dispose());
-        } else {
-          mesh.material.dispose();
+    for (const plan of plans) {
+      const A = islands[plan.a];
+      const B = islands[plan.b];
+      const pa = A.nodes[plan.na];
+      const pb = B.nodes[plan.nb];
+      const toward = new THREE.Vector2(pb.x - pa.x, pb.z - pa.z).normalize();
+      const dirOut = (isl: IslandPlan, node: number, fallback: THREE.Vector2) => {
+        const adj = isl.adjacent[node];
+        if (adj.length === 1) {
+          const o = isl.nodes[adj[0].other];
+          const n = isl.nodes[node];
+          const d = new THREE.Vector2(n.x - o.x, n.z - o.z).normalize();
+          // Follow the road out only if it roughly faces the other island
+          if (d.dot(fallback) > 0) return d.lerp(fallback, 0.25).normalize();
         }
+        return fallback.clone();
+      };
+      const da = dirOut(A, plan.na, toward);
+      const db = dirOut(B, plan.nb, toward.clone().negate()).negate(); // arriving at B
+      const frames = centerline(pa, da, pb, db);
+      const length = frames[frames.length - 1].s;
+      const nodes: THREE.Vector3[] = [];
+      const count = Math.max(1, Math.round(length / NODE_SPACING));
+      for (let k = 1; k < count; k++) {
+        const s = (length * k) / count;
+        const i = Math.min(frames.length - 1, Math.round((s / length) * (frames.length - 1)));
+        nodes.push(frames[i].p.clone());
       }
+      this.bridges.push({ plan, nodes, length });
+      this.build(world, frames);
+    }
+  }
+
+  static async load(world: RAPIER.World, islands: IslandPlan[], plans: LinkPlan[]): Promise<BridgeNetwork> {
+    const kitJson = await fetch('/mods/bridges/kit.json').then((r) => (r.ok ? (r.json() as Promise<Kit>) : DEFAULT_KIT)).catch(() => DEFAULT_KIT);
+    const kitDef: Kit = { ...DEFAULT_KIT, ...kitJson };
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const kit: Partial<Record<keyof Kit, LoadedPart>> = {};
+    await Promise.all((Object.keys(kitDef) as (keyof Kit)[]).map(async (k) => {
+      const part = kitDef[k];
+      if (!part) return;
+      try {
+        const g = await loader.loadAsync(`/mods/${part.model}`);
+        g.scene.updateMatrixWorld(true);
+        const meshes: LoadedPart['meshes'] = [];
+        const box = new THREE.Box3();
+        g.scene.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          const geometry = m.geometry.clone().applyMatrix4(m.matrixWorld);
+          // Lay the length along +X
+          if ((part.axis ?? '') === 'z') geometry.rotateY(Math.PI / 2);
+          geometry.computeBoundingBox();
+          box.union(geometry.boundingBox!);
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          meshes.push({ geometry, material: mats[0] });
+        });
+        if (!meshes.length) return;
+        const size = box.getSize(new THREE.Vector3());
+        if (!part.axis && size.z > size.x) {
+          for (const mm of meshes) mm.geometry.rotateY(Math.PI / 2);
+          box.makeEmpty();
+          for (const mm of meshes) { mm.geometry.computeBoundingBox(); box.union(mm.geometry.boundingBox!); }
+          box.getSize(size);
+        }
+        kit[k] = { meshes, length: size.x, width: size.z, height: size.y, min: box.min.clone(), max: box.max.clone(), part };
+      } catch (e) {
+        console.warn(`bridge kit: ${part.model} not loaded`, e);
+      }
+    }));
+    const tex = new THREE.TextureLoader();
+    const load = (name: string, kind: string, color: boolean) =>
+      tex.loadAsync(`/mods/coast/${name}/${name}_${kind}_2k.jpg`).then((t) => {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.anisotropy = 8;
+        if (color) t.colorSpace = THREE.SRGBColorSpace;
+        return t;
+      }).catch(() => null);
+    const pbr = async (name: string, fallback: number) => {
+      const [map, normalMap, roughnessMap] = await Promise.all([load(name, 'Diffuse', true), load(name, 'nor_gl', false), load(name, 'Rough', false)]);
+      return new THREE.MeshStandardMaterial({ map, normalMap, roughnessMap, color: map ? 0xffffff : fallback, roughness: 1 });
+    };
+    const [asphalt, concrete] = await Promise.all([pbr('asphalt_02', 0x3a3a3c), pbr('concrete_wall_008', 0x8e8c88)]);
+    return new BridgeNetwork(world, islands, plans, kit, { asphalt, concrete, paint: laneMarkings() });
+  }
+
+  private build(world: RAPIER.World, frames: Frame[]): void {
+    const half = DECK_WIDTH / 2;
+    const at = (f: Frame, x: number, y: number) =>
+      new THREE.Vector3().copy(f.p).addScaledVector(f.r, x).setY(f.p.y + y);
+    // --- Collision: road surface and a wall along each edge ---
+    const col: number[] = [];
+    const colIdx: number[] = [];
+    const section = [[-half, BARRIER_HEIGHT], [-half, 0], [half, 0], [half, BARRIER_HEIGHT]];
+    frames.forEach((f, i) => {
+      // The first and last metres dip a hair under the city's road so there's no lip to hit
+      const dip = i === 0 || i === frames.length - 1 ? -0.12 : 0;
+      for (const [x, y] of section) {
+        const v = at(f, x, y + dip);
+        col.push(v.x, v.y, v.z);
+      }
+      if (i === 0) return;
+      const a = (i - 1) * 4;
+      const b = i * 4;
+      for (let k = 0; k < 3; k++) colIdx.push(a + k, a + k + 1, b + k, b + k, a + k + 1, b + k + 1);
     });
-    this.root.clear();
+    world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(col), new Uint32Array(colIdx))
+      .setFriction(1).setCollisionGroups(STATIC_GROUPS));
+
+    // --- Deck: kit pieces, else a ribbon ---
+    const deck = this.kit.deck;
+    if (deck) this.instanceAlong(frames, deck, () => {
+      const top = deck.part.top ?? deck.max.y;
+      const sw = DECK_WIDTH / deck.width;
+      return { x: 0, y: -top * sw, sx: 1, sy: sw, sz: sw };
+    }, deck.length * (DECK_WIDTH / deck.width), false);
+    else this.ribbonDeck(frames);
+
+    // Lane markings are paint on whatever deck there is
+    this.ribbon(frames, [[-half + 0.3, 0.03], [half - 0.3, 0.03]], this.mats.paint, [0, 1], false);
+
+    // --- Barriers along both edges ---
+    const barrier = this.kit.barrier;
+    if (barrier) {
+      const stretch = barrier.part.stretch ?? 1;
+      for (const side of [-1, 1]) {
+        this.instanceAlong(frames, barrier, () => ({
+          x: side * (half - barrier.width / 2), y: -barrier.min.y, sx: stretch, sy: 1, sz: 1,
+        }), barrier.length * stretch, true);
+      }
+    } else {
+      for (const side of [-1, 1]) {
+        const x = side * half;
+        this.ribbon(frames, [[x, 0], [x, BARRIER_HEIGHT], [x + side * 0.4, BARRIER_HEIGHT], [x + side * 0.4, -DECK_DEPTH]], this.mats.concrete, [0, 0.3, 0.4, 1], false);
+      }
+    }
+
+    // --- Lamps ---
+    const lamp = this.kit.lamp;
+    if (lamp) {
+      const spacing = lamp.part.spacing ?? 60;
+      const list: THREE.Matrix4[] = [];
+      for (let s = spacing / 2, k = 0; s < frames[frames.length - 1].s; s += spacing, k++) {
+        const f = frames[Math.min(frames.length - 1, Math.round(s / STEP))];
+        const side = k % 2 ? 1 : -1;
+        const p = at(f, side * (half - 0.2), -lamp.min.y);
+        const yaw = Math.atan2(-f.r.z * side, f.r.x * side);
+        list.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(1.6, 1.6, 1.6)));
+      }
+      this.instances(lamp, list, true);
+    }
+
+    // --- Pillars down to the seabed, where the deck is high enough to need them ---
+    const pillar = this.kit.pillar;
+    const list: { f: Frame; h: number }[] = [];
+    for (let s = PILLAR_SPACING; s < frames[frames.length - 1].s - PILLAR_SPACING / 2; s += PILLAR_SPACING) {
+      const f = frames[Math.round(s / STEP)];
+      if (f.p.y < 6) continue;
+      list.push({ f, h: f.p.y - DECK_DEPTH - SEABED });
+      const hy = (f.p.y - DECK_DEPTH - SEABED) / 2;
+      world.createCollider(RAPIER.ColliderDesc.cuboid(1.4, hy, half * 0.7)
+        .setTranslation(f.p.x, SEABED + hy, f.p.z)
+        .setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(-f.t.z, f.t.x), 0)))
+        .setCollisionGroups(STATIC_GROUPS));
+    }
+    if (pillar) {
+      const mats = list.map(({ f, h }) => {
+        const sy = h / pillar.height;
+        const sxz = Math.min(3, Math.max(0.5, (DECK_WIDTH * 0.8) / Math.max(pillar.width, pillar.length)));
+        const p = new THREE.Vector3(f.p.x, SEABED - pillar.min.y * sy, f.p.z);
+        return new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(-f.t.z, f.t.x) + Math.PI / 2, 0)), new THREE.Vector3(sxz, sy, sxz));
+      });
+      this.instances(pillar, mats, false);
+    } else {
+      this.fallbackPillars(list);
+    }
+  }
+
+  /** A strip along the curve through cross-section points (x across, y up), u across, v along. */
+  private ribbon(frames: Frame[], section: [number, number][], material: THREE.Material, us: number[], collide: boolean): void {
+    void collide;
+    const pos: number[] = [];
+    const uv: number[] = [];
+    const idx: number[] = [];
+    const m = section.length;
+    const vScale = material === this.mats.paint ? 1 / 12 : 1 / 8;
+    frames.forEach((f, i) => {
+      section.forEach(([x, y], j) => {
+        const v = new THREE.Vector3().copy(f.p).addScaledVector(f.r, x).setY(f.p.y + y);
+        pos.push(v.x, v.y, v.z);
+        uv.push(material === this.mats.paint ? us[j] : (us[j] * DECK_WIDTH) / 8, f.s * vScale);
+      });
+      if (i === 0) return;
+      const a = (i - 1) * m;
+      const b = i * m;
+      for (let k = 0; k < m - 1; k++) idx.push(a + k, b + k, a + k + 1, a + k + 1, b + k, b + k + 1);
+    });
+    this.addChunked(pos, uv, idx, material, frames, m);
+  }
+
+  private ribbonDeck(frames: Frame[]): void {
+    const half = DECK_WIDTH / 2;
+    this.ribbon(frames, [[-half, 0], [half, 0]], this.mats.asphalt, [0, 1], true);
+    // Girder: sides and underside
+    this.ribbon(frames, [[half, 0], [half, -DECK_DEPTH], [half - 3, -DECK_DEPTH], [-half + 3, -DECK_DEPTH], [-half, -DECK_DEPTH], [-half, 0]], this.mats.concrete, [0, 0.1, 0.25, 0.75, 0.9, 1], false);
+  }
+
+  /** Split a ribbon into chunks along its length (frustum culling), as meshes. */
+  private addChunked(pos: number[], uv: number[], idx: number[], material: THREE.Material, frames: Frame[], m: number): void {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const per = Math.max(1, Math.round(PIECE_CHUNK / STEP));
+    const quads = (m - 1) * 6;
+    for (let start = 0; start < frames.length - 1; start += per) {
+      const end = Math.min(frames.length - 1, start + per);
+      const g = geo.clone();
+      g.setIndex(idx.slice(start * quads, end * quads));
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      // The shared vertex buffer's bounding sphere would cover the whole bridge: use this chunk's
+      const box = new THREE.Box3();
+      for (let i = start; i <= end; i++) box.expandByPoint(frames[i].p);
+      box.expandByScalar(DECK_WIDTH);
+      g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+      const mesh = new THREE.Mesh(g, material);
+      mesh.receiveShadow = true;
+      mesh.castShadow = material !== this.mats.paint;
+      this.root.add(mesh);
+    }
+  }
+
+  /** Repeat a straight kit piece along the curve, each copy set on the curve's tangent. */
+  private instanceAlong(
+    frames: Frame[], part: LoadedPart, place: (f: Frame) => { x: number; y: number; sx: number; sy: number; sz: number },
+    pieceLength: number, detail: boolean,
+  ): void {
+    const S = frames[frames.length - 1].s;
+    const count = Math.max(1, Math.round(S / pieceLength));
+    const len = S / count;
+    const list: THREE.Matrix4[] = [];
+    const q = new THREE.Quaternion();
+    const basis = new THREE.Matrix4();
+    for (let k = 0; k < count; k++) {
+      const s = (k + 0.5) * len;
+      const i = Math.min(frames.length - 1, Math.round(s / STEP));
+      const f = frames[i];
+      const o = place(f);
+      // Piece axes: length along the tangent, up, across to the right
+      const up = new THREE.Vector3().crossVectors(f.r, f.t).normalize();
+      basis.makeBasis(f.t, up, f.r);
+      q.setFromRotationMatrix(basis);
+      const p = new THREE.Vector3().copy(f.p).addScaledVector(f.r, o.x).addScaledVector(up, o.y);
+      // Each copy covers `len` m (a hair more, closing the gaps on curves), centred on its point
+      const sx = (len * 1.02) / part.length;
+      p.addScaledVector(f.t, -((part.min.x + part.max.x) / 2) * sx);
+      list.push(new THREE.Matrix4().compose(p, q, new THREE.Vector3(sx, o.sy, o.sz)));
+    }
+    this.instances(part, list, detail);
+  }
+
+  /** Instanced copies of a kit part, chunked for culling. */
+  private instances(part: LoadedPart, list: THREE.Matrix4[], detail: boolean): void {
+    const per = Math.max(1, Math.round(PIECE_CHUNK / Math.max(1, part.length)));
+    for (let start = 0; start < list.length; start += per) {
+      const chunk = list.slice(start, start + per);
+      for (const { geometry, material } of part.meshes) {
+        const mesh = new THREE.InstancedMesh(geometry, material, chunk.length);
+        chunk.forEach((m, k) => mesh.setMatrixAt(k, m));
+        mesh.computeBoundingSphere();
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.root.add(mesh);
+        if (detail) this.detail.push({ mesh, center: mesh.boundingSphere!.center.clone(), radius: mesh.boundingSphere!.radius });
+      }
+    }
+  }
+
+  private fallbackPillars(list: { f: Frame; h: number }[]): void {
+    if (!list.length) return;
+    const geo = new THREE.BoxGeometry(2.8, 1, DECK_WIDTH * 0.7);
+    geo.translate(0, 0.5, 0);
+    // Texture repeats in metres whatever the scale
+    const mesh = new THREE.InstancedMesh(geo, this.mats.concrete, list.length);
+    list.forEach(({ f, h }, k) => {
+      mesh.setMatrixAt(k, new THREE.Matrix4().compose(
+        new THREE.Vector3(f.p.x, SEABED, f.p.z),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(-f.t.z, f.t.x), 0)),
+        new THREE.Vector3(1, h, 1),
+      ));
+    });
+    mesh.computeBoundingSphere();
+    mesh.receiveShadow = true;
+    this.root.add(mesh);
+  }
+
+  /** Hide small parts (barriers, lamps) far from the camera. */
+  update(camera: THREE.Vector3): void {
+    for (const d of this.detail) d.mesh.visible = d.center.distanceTo(camera) - d.radius < DETAIL_DISTANCE;
   }
 }
 
-/**
- * Generate bridge connections between islands. Finds pairs of islands close enough to bridge,
- * picks road endpoints near each other, and creates straight bridge segments.
- */
-export function generateBridges(
-  islands: Array<{ offset: THREE.Vector3; roadNodes: Array<[number, number, number]>; bounds: [number, number, number, number] }>,
-  maxBridgeLength = 1500,
-): BridgeSegment[] {
-  const segments: BridgeSegment[] = [];
-  const connected = new Set<string>();
-
-  for (let i = 0; i < islands.length; i++) {
-    for (let j = i + 1; j < islands.length; j++) {
-      const a = islands[i];
-      const b = islands[j];
-
-      // Find closest road nodes between the two islands
-      let bestDist = Infinity;
-      let bestA: THREE.Vector3 | null = null;
-      let bestB: THREE.Vector3 | null = null;
-
-      // Sample subset of nodes for performance
-      const sampleA = a.roadNodes.filter((_, k) => k % 10 === 0);
-      const sampleB = b.roadNodes.filter((_, k) => k % 10 === 0);
-
-      for (const [ax, ay, az] of sampleA) {
-        const posA = new THREE.Vector3(ax, ay, az);
-        for (const [bx, by, bz] of sampleB) {
-          const posB = new THREE.Vector3(bx, by, bz);
-          const dist = posA.distanceTo(posB);
-          if (dist < bestDist && dist < maxBridgeLength) {
-            bestDist = dist;
-            bestA = posA;
-            bestB = posB;
-          }
-        }
-      }
-
-      if (bestA && bestB) {
-        const key = [i, j].sort().join('-');
-        if (!connected.has(key)) {
-          segments.push({ from: bestA, to: bestB });
-          connected.add(key);
-        }
-      }
-    }
-  }
-
-  return segments;
+/** Lane markings as a texture across the deck: solid edge lines, dashed lane lines, a double centre line. */
+function laneMarkings(): THREE.Material {
+  const W = 256;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, W, H);
+  const usable = DECK_WIDTH - 0.6;
+  const px = (m: number) => ((m + usable / 2) / usable) * W;
+  const line = (m: number, width: number, dashed: boolean, color: string) => {
+    g.fillStyle = color;
+    const w = Math.max(1.5, (width / usable) * W);
+    if (dashed) g.fillRect(px(m) - w / 2, 0, w, H * 0.4);
+    else g.fillRect(px(m) - w / 2, 0, w, H);
+  };
+  line(-usable / 2 + 0.5, 0.15, false, '#e8e6df');
+  line(usable / 2 - 0.5, 0.15, false, '#e8e6df');
+  line(-3.4, 0.12, true, '#e8e6df');
+  line(3.4, 0.12, true, '#e8e6df');
+  line(-0.15, 0.12, false, '#e0b43a');
+  line(0.15, 0.12, false, '#e0b43a');
+  const t = new THREE.CanvasTexture(c);
+  t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return new THREE.MeshStandardMaterial({
+    map: t, transparent: true, depthWrite: false, roughness: 0.6,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
 }

@@ -3,6 +3,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { N8AOPass } from 'n8ao';
+import { EFFECTS } from './quality';
 
 // Only HDR-bright surfaces cross the threshold: at night light bars, neon and lit windows; by day,
 // when sunlit concrete is already bright, only the sun's glints and lamps
@@ -13,13 +15,34 @@ export interface Bloom {
 }
 const NIGHT_BLOOM: Bloom = { strength: 0.85, radius: 0.4, threshold: 0.9 };
 
-/** Scene render → bloom (half resolution internally) → tone mapping + sRGB output. */
+/**
+ * Scene render with ambient occlusion (N8AO, half resolution; a plain render at ?quality=low) → bloom
+ * (half resolution internally) → tone mapping + sRGB output.
+ */
 export class PostFX {
   private readonly composer: EffectComposer;
+  readonly ao: N8AOPass | null = null;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, bloom: Bloom = NIGHT_BLOOM) {
     this.composer = new EffectComposer(renderer);
-    this.composer.addPass(new RenderPass(scene, camera));
+    if (!EFFECTS.ao) {
+      this.composer.addPass(new RenderPass(scene, camera));
+    } else {
+      // Contact shadows where walls meet the street, under awnings, in window recesses: the depth that
+      // flat-lit city meshes lack. World-space radius, so it's the same at any distance.
+      const ao = new N8AOPass(scene, camera, 512, 512);
+      ao.setQualityMode('Performance');
+      Object.assign(ao.configuration, {
+        halfRes: true,
+        depthAwareUpsampling: true,
+        aoRadius: 4,
+        distanceFalloff: 1.5,
+        intensity: 2.5,
+        gammaCorrection: false, // the composer's buffers are linear HDR; OutputPass does the sRGB step
+      });
+      this.ao = ao;
+      this.composer.addPass(ao);
+    }
     this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), bloom.strength, bloom.radius, bloom.threshold));
     this.composer.addPass(new OutputPass());
   }

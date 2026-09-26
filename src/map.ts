@@ -4,6 +4,7 @@
 // rivals, events and the GPS.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { EFFECTS } from './quality';
 
 const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
 const COLLISION_RADIUS = 600; // m of collision around the player and rivals (traffic lives within ~300 m)
@@ -16,6 +17,59 @@ const DRAW_DISTANCE_PER_METER = 18;
 const MIN_DRAW_DISTANCE = 120;
 const UNTAGGED_DRAW_DISTANCE_PER_METER = 40;
 const UNTAGGED_MIN_DRAW_DISTANCE = 300;
+// Far skyline (far/<cellId>.bin from scripts/map-extras.mjs, optional): simplified cells drawn beyond
+// the render radius, swapped out when the full cell streams in
+const FAR_RADIUS = 3000;
+const FAR_LOADS_PER_FRAME = 2;
+
+// Lighting hooks the atmosphere installs (shadows); applied to every map material, old and new
+let lightingSetup: ((m: THREE.MeshStandardMaterial) => void) | null = null;
+const litMaterials = new Set<THREE.MeshStandardMaterial>();
+/** GTA's baked vertex shading: how strongly it darkens, and the night glow of its artificial ambient. */
+const shadeUniforms = { uShadeNight: { value: 0 } };
+
+/** Called by the atmosphere: `setup` patches a material for cascaded shadows (null: no shadows). */
+export function setMapLighting(setup: ((m: THREE.MeshStandardMaterial) => void) | null): void {
+  lightingSetup = setup;
+  if (setup) for (const m of litMaterials) applyLighting(m);
+}
+
+function applyLighting(m: THREE.MeshStandardMaterial): void {
+  if (!lightingSetup || m.userData.lit) return;
+  m.userData.lit = true;
+  const own = m.onBeforeCompile;
+  lightingSetup(m);
+  const extra = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    extra.call(m, shader, renderer);
+    own.call(m, shader, renderer);
+  };
+  m.needsUpdate = true;
+}
+
+/**
+ * GTA colour0 per vertex: R ≈ sky visibility (baked ambient occlusion), G ≈ artificial ambient (lamps,
+ * lit interiors). It scales the sky light and reflections, darkens direct light a little, and at
+ * night adds a faint warm glow where G says there's artificial light.
+ */
+function shadeMaterial(m: THREE.MeshStandardMaterial): void {
+  m.defines = { ...m.defines, USE_SHADE: '' };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uShadeNight = shadeUniforms.uShadeNight;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 shade;\nvarying vec4 vShade;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvShade = shade;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vShade;\nuniform float uShadeNight;')
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+        float skyVis = mix(0.3, 1.0, vShade.r);
+        reflectedLight.indirectDiffuse *= skyVis;
+        reflectedLight.indirectSpecular *= skyVis * skyVis;
+        reflectedLight.directDiffuse *= mix(0.7, 1.0, vShade.r);
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(1.0, 0.8, 0.55) * vShade.g * vShade.g * uShadeNight * 0.12;`);
+  };
+}
+
 let fetching = 0;
 const queued: (() => void)[] = [];
 /** fetch() a few at a time, retried on network errors; the body, or null for an HTTP error. */
@@ -78,9 +132,14 @@ export class GameMap {
   readonly min = new THREE.Vector2(Infinity, Infinity);
   readonly max = new THREE.Vector2(-Infinity, -Infinity);
   private readonly local = new THREE.Vector3();
-  private readonly materials: (THREE.Material | null)[];
+  // Per manifest material: [plain, with vertex shading]. Batches with and without colours share a
+  // manifest material, so each variant is its own three.js material (different vertex attributes).
+  private readonly materials: [Promise<THREE.Material> | null, Promise<THREE.Material> | null][];
+  private readonly built: THREE.Material[] = [];
   private readonly textures = new Map<string, Promise<THREE.Texture | null>>();
   private readonly meshes = new Map<number, THREE.Group | 'loading'>();
+  private readonly far = new Map<number, THREE.Group | 'loading' | 'none'>();
+  private farState: 'unknown' | 'checking' | 'yes' | 'no' = 'unknown';
   private readonly colliders = new Map<number, RAPIER.Collider | 'loading'>();
 
   private constructor(
@@ -96,7 +155,7 @@ export class GameMap {
     this.roadData = { ...roads, nodes: roads.nodes.map(([x, y, z]) => [x + ox, y + oy, z + oz]) };
     this.roads = new RoadGraph(this.roadData);
     this.spawn = new THREE.Vector3(...(manifest.spawn as [number, number, number])).add(offset);
-    this.materials = manifest.materials.map(() => null);
+    this.materials = manifest.materials.map(() => [null, null]);
     this.root.name = `map:${id}`;
     this.root.position.copy(offset);
     const s = manifest.cellSize;
@@ -149,13 +208,14 @@ export class GameMap {
 
   /** Anything streamed in right now (render or collision)? */
   get active(): boolean {
-    return this.meshes.size > 0 || this.colliders.size > 0;
+    return this.meshes.size > 0 || this.colliders.size > 0 || this.far.size > 0;
   }
 
   /** Emissive overlays (lit windows, signs) only glow at night: 0 by day, 1 at night. */
   setNight(amount: number): void {
     this.night = amount;
-    for (const m of this.materials) if (m) this.applyNight(m);
+    shadeUniforms.uShadeNight.value = amount;
+    for (const m of this.built) this.applyNight(m);
   }
 
   private night = 1;
@@ -185,6 +245,7 @@ export class GameMap {
   /** Stream cells in and out. `camera` drives what's drawn; `solid` (player, rivals) what's collidable. */
   update(camera: THREE.Vector3, solid: THREE.Vector3[]): void {
     let budget = LOADS_PER_FRAME;
+    let farBudget = FAR_LOADS_PER_FRAME;
     const wanted = this.manifest.cells
       .map((c) => ({ c, d: this.distance(c, camera) }))
       .sort((a, b) => a.d - b.d);
@@ -198,6 +259,21 @@ export class GameMap {
           this.root.remove(have);
           have.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
           this.meshes.delete(c.id);
+          const far = this.far.get(c.id);
+          if (far && far !== 'loading' && far !== 'none') far.visible = true;
+        }
+        // The far skyline: from just inside the render radius (so it's there when the cell unloads)
+        // out to FAR_RADIUS
+        const far = this.far.get(c.id);
+        const full = this.meshes.get(c.id);
+        if (!far && d > RENDER_RADIUS * 0.8 && d < FAR_RADIUS && farBudget > 0 && (!full || d > RENDER_RADIUS)) {
+          if (!EFFECTS.far) { /* ?quality=low: no far skyline */ } else if (this.farState === 'unknown') void this.checkFar();
+          else if (this.farState === 'yes') {
+            farBudget--;
+            void this.loadFar(c);
+          }
+        } else if (far && far !== 'loading' && (d > FAR_RADIUS + 300 || (full && full !== 'loading' && d < RENDER_RADIUS * 0.7))) {
+          this.dropFar(c.id);
         }
       }
       if (c.collision) {
@@ -247,6 +323,55 @@ export class GameMap {
     this.meshes.set(c.id, 'loading');
     const buf = await download(`${this.base}/cells/${c.id}.bin`);
     if (!buf) return;
+    const group = await this.parseCell(buf, false);
+    if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
+    this.meshes.set(c.id, group);
+    this.root.add(group);
+    const far = this.far.get(c.id);
+    if (far && far !== 'loading' && far !== 'none') far.visible = false;
+  }
+
+  /** extras.json says whether this map has a far skyline (scripts/map-extras.mjs; optional). */
+  private async checkFar(): Promise<void> {
+    this.farState = 'checking';
+    try {
+      const r = await fetch(`${this.base}/extras.json`);
+      const extras = r.ok ? ((await r.json()) as { hasFar?: boolean }) : null;
+      this.farState = extras?.hasFar ? 'yes' : 'no';
+    } catch {
+      this.farState = 'no';
+    }
+  }
+
+  private async loadFar(c: CellInfo): Promise<void> {
+    this.far.set(c.id, 'loading');
+    const buf = await download(`${this.base}/far/${c.id}.bin`);
+    if (this.far.get(c.id) !== 'loading') return;
+    // No far copy of this cell (nothing big enough in it). A dev server answers a missing file with its
+    // index page, so check the file looks like a cell: a JSON header after the length.
+    if (!buf || buf.byteLength < 8 || new Uint8Array(buf, 4, 1)[0] !== 0x7b) {
+      this.far.set(c.id, 'none');
+      return;
+    }
+    const group = await this.parseCell(buf, true);
+    if (this.far.get(c.id) !== 'loading') return;
+    const full = this.meshes.get(c.id);
+    group.visible = !full || full === 'loading';
+    this.far.set(c.id, group);
+    this.root.add(group);
+  }
+
+  private dropFar(id: number): void {
+    const far = this.far.get(id);
+    if (far && far !== 'loading' && far !== 'none') {
+      this.root.remove(far);
+      far.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    }
+    this.far.delete(id);
+  }
+
+  /** A cell file (cells/ or far/): header JSON, then per batch interleaved vertices and indices. */
+  private async parseCell(buf: ArrayBuffer, far: boolean): Promise<THREE.Group> {
     const view = new DataView(buf);
     const jsonLength = view.getUint32(0, true);
     const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
@@ -275,17 +400,27 @@ export class GameMap {
       geo.setAttribute('uv', new THREE.InterleavedBufferAttribute(ib, 2, 6));
       geo.setIndex(new THREE.BufferAttribute(index, 1));
       geo.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geo, await this.material(b.material));
+      const material = await this.material(b.material, !!b.colors);
+      const mesh = new THREE.Mesh(geo, material);
       mesh.matrixAutoUpdate = false;
-      mesh.userData.detail = b.detail ?? null; // null: an old map without structure/detail tags
+      // null: an old map without structure/detail tags. Far cells are never culled (already simplified).
+      mesh.userData.detail = far ? false : (b.detail ?? null);
       const m = this.manifest.materials[b.material];
       if (m.blend) mesh.renderOrder = 1;
+      // Solid surfaces cast and take the sun's shadows; the far skyline is beyond the shadow range
+      const solid = material instanceof THREE.MeshStandardMaterial && !m.blend && !material.transparent;
+      mesh.castShadow = !far && solid;
+      mesh.receiveShadow = !far && material instanceof THREE.MeshStandardMaterial;
+      if (material.userData.shadowProxy) {
+        // GTA's invisible shadow casters (tree canopies): only drawn into the shadow map
+        if (far || !EFFECTS.shadows) continue;
+        mesh.castShadow = true;
+        mesh.userData.detail = false;
+      }
       group.add(mesh);
     }
     group.matrixAutoUpdate = false;
-    if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
-    this.meshes.set(c.id, group);
-    this.root.add(group);
+    return group;
   }
 
   private async loadCollision(c: CellInfo): Promise<void> {
@@ -304,15 +439,28 @@ export class GameMap {
     this.colliders.set(c.id, collider);
   }
 
-  private async material(i: number): Promise<THREE.Material> {
-    const existing = this.materials[i];
-    if (existing) return existing;
+  /** The material for a manifest entry; `shaded` for batches carrying GTA's vertex shading. */
+  private material(i: number, shaded: boolean): Promise<THREE.Material> {
+    const slot = this.materials[i];
+    const k = shaded ? 1 : 0;
+    const made = (slot[k] ??= this.makeMaterial(i, shaded).then((mat) => {
+      this.built.push(mat);
+      return mat;
+    }));
+    return made;
+  }
+
+  private async makeMaterial(i: number, shaded: boolean): Promise<THREE.Material> {
     const m = this.manifest.materials[i];
     const [map, normalMap] = await Promise.all([
       m.diffuse ? this.texture(m.diffuse, true) : null,
       m.normal ? this.texture(m.normal, false) : null,
     ]);
-    if (this.materials[i]) return this.materials[i]!;
+    if (m.shader.includes('shadow_proxy')) {
+      const proxy = new THREE.MeshStandardMaterial({ colorWrite: false, depthWrite: false });
+      proxy.userData.shadowProxy = true;
+      return proxy;
+    }
     // GTA's emissive shaders are overlays: lit windows and signs drawn over the building, shaped by the
     // texture's alpha. Add them as glow on top rather than as solid surfaces.
     if (m.shader.startsWith('emissive') && map) {
@@ -326,7 +474,6 @@ export class GameMap {
       });
       glow.userData.glow = m.shader.includes('night') ? 2.5 : 1.8;
       this.applyNight(glow);
-      this.materials[i] = glow;
       return glow;
     }
     const spec = m.shader.includes('spec');
@@ -370,7 +517,9 @@ export class GameMap {
       mat.userData.glow = m.shader.includes('night') ? 2.2 : 0.25;
       this.applyNight(mat);
     }
-    this.materials[i] = mat;
+    if (shaded && EFFECTS.shade) shadeMaterial(mat);
+    litMaterials.add(mat);
+    applyLighting(mat);
     return mat;
   }
 

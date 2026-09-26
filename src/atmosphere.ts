@@ -2,8 +2,11 @@
 // scripts/fetch-environment.mjs): it's the backdrop, the image-based light every surface picks up, and
 // where the sun is. Haze takes its colour from the sky at the horizon. Rain is optional (?rain).
 import * as THREE from 'three';
+import { CSM } from 'three/addons/csm/CSM.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { setMapLighting } from './map';
 import type { Bloom } from './postfx';
+import { EFFECTS } from './quality';
 
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 
@@ -21,6 +24,10 @@ const LOOKS: Record<TimeOfDay, Look> = {
   night: { exposure: 1.8, sun: 0.2, environment: 1.4, fog: 0.0006, night: 1, bloom: { strength: 1.2, radius: 0.5, threshold: 0.7 } },
 };
 const HORIZON_BLEND = 0.05; // fraction of the photograph's height above the horizon faded into haze
+// Sun shadows: two cascades out to SHADOW_DISTANCE, soft PCF. None at night (the "sun" is moonlight).
+const SHADOW_DISTANCE = 250;
+const SHADOW_MAP_SIZE = 2048;
+const RESCAN_FRAMES = 30; // how often new lit materials (cars spawning) are hooked up to the cascades
 const RAIN_DROPS = 6000;
 const RAIN_BOX = 120; // meters around the camera
 const RAIN_HEIGHT = 60;
@@ -30,8 +37,12 @@ export class Atmosphere {
   readonly look: Look;
   private readonly sunOffset = new THREE.Vector3();
   private readonly rain: THREE.ShaderMaterial | null;
+  private csm: CSM | null = null;
+  private shadowCamera: THREE.PerspectiveCamera | null = null;
+  private readonly lastProjection = new THREE.Matrix4();
+  private frames = 0;
 
-  private constructor(scene: THREE.Scene, sky: THREE.DataTexture, environment: THREE.Texture, readonly time: TimeOfDay, rain: boolean) {
+  private constructor(private readonly scene: THREE.Scene, sky: THREE.DataTexture, environment: THREE.Texture, readonly time: TimeOfDay, rain: boolean) {
     this.look = LOOKS[time];
     scene.background = sky;
     scene.environment = environment;
@@ -59,10 +70,79 @@ export class Atmosphere {
     return new Atmosphere(scene, sky, environment, time, rain);
   }
 
+  /**
+   * Cascaded sun shadows for this camera (off at ?quality=low and at night). The cascades' lights
+   * replace the plain sun, and every lit material in the scene is set up for them.
+   */
+  castShadows(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+    if (!EFFECTS.shadows || this.time === 'night' || this.csm) return;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    const csm = new CSM({
+      camera,
+      parent: this.scene,
+      cascades: 2,
+      maxFar: SHADOW_DISTANCE,
+      mode: 'practical',
+      shadowMapSize: SHADOW_MAP_SIZE,
+      lightDirection: this.sunOffset.clone().normalize().negate(),
+      lightIntensity: this.look.sun,
+      lightNear: 1,
+      lightFar: 3000,
+      lightMargin: 400, // towers outside the view still shade the street
+      shadowBias: -0.0002,
+    });
+    csm.fade = true;
+    for (const light of csm.lights) {
+      light.color.copy(this.sun.color);
+      light.shadow.normalBias = 0.04;
+      light.shadow.radius = 2;
+    }
+    this.scene.remove(this.sun);
+    this.csm = csm;
+    this.shadowCamera = camera;
+    this.lastProjection.copy(camera.projectionMatrix);
+    csm.updateFrustums();
+    setMapLighting((m) => csm.setupMaterial(m));
+    this.hookMaterials();
+  }
+
+  /** Lit materials not set up for the cascades would take every cascade's light: set them up. */
+  private hookMaterials(): void {
+    const csm = this.csm!;
+    this.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const lit = m instanceof THREE.MeshStandardMaterial || m instanceof THREE.MeshLambertMaterial || m instanceof THREE.MeshPhongMaterial;
+        if (!lit || m.userData.lit) continue;
+        m.userData.lit = true;
+        const own = m.onBeforeCompile;
+        csm.setupMaterial(m);
+        const cascades = m.onBeforeCompile;
+        m.onBeforeCompile = (shader, renderer) => {
+          cascades.call(m, shader, renderer);
+          own.call(m, shader, renderer);
+        };
+        m.needsUpdate = true;
+      }
+    });
+  }
+
   update(time: number, camera: THREE.Vector3): void {
     // The sun's light follows the camera so its direction is the same everywhere on the islands
     this.sun.target.position.copy(camera);
     this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
+    if (this.csm) {
+      // The chase camera's FOV breathes with speed: refit the cascades when the projection changes
+      if (!this.lastProjection.equals(this.shadowCamera!.projectionMatrix)) {
+        this.lastProjection.copy(this.shadowCamera!.projectionMatrix);
+        this.csm.updateFrustums();
+      }
+      this.shadowCamera!.updateMatrixWorld();
+      this.csm.update();
+      if (++this.frames % RESCAN_FRAMES === 0) this.hookMaterials();
+    }
     if (this.rain) {
       this.rain.uniforms.uTime.value = time;
       this.rain.uniforms.uCam.value.copy(camera);

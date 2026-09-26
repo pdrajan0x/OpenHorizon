@@ -26,6 +26,23 @@ const CARS = [
   { id: 'traffic-landcruiser', mod: 'traffic-landcruiser', model: 'lc200', name: 'Land Cruiser', make: 'Toyota' },
   { id: 'traffic-f150', mod: 'traffic-f150-raptor', model: 'f150', name: 'F-150 Raptor', make: 'Ford' },
   { id: 'traffic-sprinter', mod: 'traffic-sprinter', model: 'sprinter211', name: 'Sprinter', make: 'Mercedes-Benz' },
+  { id: 'traffic-corolla', mod: 'traffic-corolla', model: 'stanier', name: 'Corolla', make: 'Toyota' },
+  { id: 'traffic-bmw-330i', mod: 'traffic-bmw-330i', model: 'gxg20', name: '330i', make: 'BMW' }, // dlc.rpf only
+  { id: 'traffic-mercedes-e300', mod: 'traffic-mercedes-e300', model: 'schafter2', name: 'E300', make: 'Mercedes-Benz' },
+  { id: 'traffic-mercedes-c', mod: 'traffic-mercedes-c', model: 'schwarzer', name: 'C-Class', make: 'Mercedes-Benz' },
+  { id: 'traffic-golf', mod: 'traffic-golf', model: 'golf75r', name: 'Golf R', make: 'Volkswagen' }, // dlc.rpf only
+  { id: 'traffic-explorer', mod: 'traffic-explorer', model: 'explorer', name: 'Explorer', make: 'Ford' },
+  { id: 'traffic-tahoe', mod: 'traffic-tahoe', model: 'rancherxl', name: 'Tahoe', make: 'Chevrolet' },
+  { id: 'traffic-silverado', mod: 'traffic-silverado', model: 'silv', name: 'Silverado', make: 'Chevrolet' },
+  { id: 'traffic-altima', mod: 'traffic-altima', model: '23altimavctsr', name: 'Altima', make: 'Nissan' }, // the loose replace is the 2013 car
+  { id: 'traffic-sonata', mod: 'traffic-sonata', model: 'oracle2', name: 'Sonata', make: 'Hyundai' },
+  { id: 'traffic-kia-k5', mod: 'traffic-kia-k5', model: 'stanier', name: 'K5', make: 'Kia' },
+  { id: 'traffic-london-cab', mod: 'traffic-london-cab', model: 'dilettante', name: 'TX Taxi', make: 'LEVC' },
+  { id: 'traffic-bus-man', mod: 'traffic-bus-man', model: 'bus', name: "Lion's City", make: 'MAN' },
+  { id: 'traffic-transit', mod: 'traffic-transit', model: 'moonbeam2', name: 'Transit', make: 'Ford' },
+  { id: 'traffic-crown-comfort-taxi', mod: 'traffic-crown-comfort-taxi', model: 'taxi', name: 'Crown Comfort Taxi', make: 'Toyota' },
+  { id: 'traffic-kei-truck', mod: 'traffic-kei-truck', model: 'keitorac', name: 'Keitora', make: 'Kei truck' }, // dlc.rpf only
+  { id: 'traffic-swift', mod: 'traffic-swift', model: 'swift2021', name: 'Swift', make: 'Suzuki' }, // dlc.rpf only
 ];
 const CONV = 'tools/gta5conv/bin/Release/net10.0/gta5conv.dll';
 const RAW = '.build/cars';

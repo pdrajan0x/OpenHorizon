@@ -3,7 +3,7 @@
 // Mouse wheel or +/- zooms, dragging or the arrow keys pan. Click any city label to jump to it.
 import * as THREE from 'three';
 import type { Islands } from './islands';
-import type { MapExtras } from './minimap';
+import { MapTiles, type MapExtras } from './minimap';
 
 const MIN_SCALE = 0.001; // px per m: the whole archipelago
 const MAX_SCALE = 1.2; // px per m: a few blocks
@@ -19,6 +19,8 @@ export class WorldMap {
   private drag: { x: number; y: number; moved: boolean } | null = null;
   private player = { x: 0, z: 0, heading: 0 };
   private extras: MapExtras | null = null;
+  private readonly tiles: MapTiles;
+  private redraw = 0;
   private readonly labels: { name: string; x: number; z: number; box?: { x0: number; y0: number; x1: number; y1: number } }[];
 
   constructor(private readonly islands: Islands, private readonly onToggle: (open: boolean) => void) {
@@ -27,6 +29,13 @@ export class WorldMap {
     this.canvas.className = 'hidden';
     document.body.appendChild(this.canvas);
     this.g = this.canvas.getContext('2d')!;
+
+    // Top-down map images from scripts/map-extras.mjs, shared with the minimap; redraw as they arrive
+    this.tiles = new MapTiles(islands.maps);
+    MapTiles.shared = this.tiles;
+    this.tiles.onLoad = () => {
+      if (this.open && !this.redraw) this.redraw = requestAnimationFrame(() => { this.redraw = 0; this.draw(); });
+    };
 
     // Each island is labelled at the middle of its streets
     this.labels = islands.maps.map((m, i) => {
@@ -189,9 +198,16 @@ export class WorldMap {
     g.lineCap = 'round';
     g.lineJoin = 'round';
 
-    const strokeRoads = (width: (lanes: number) => number, colour: string) => {
+    // Visible world rectangle, for picking tiles
+    const c0 = this.toWorld(0, h), c1 = this.toWorld(w, 0);
+    this.tiles.draw(g, c0.x, c0.y, c1.x, c1.y, this.scale);
+
+    // Road links where there are no map images (bridges, islands without extras): the old stroked look
+    const tiles = this.tiles;
+    const bare = roads.links.filter((l) => !(tiles.covers(nodes[l.a].x, nodes[l.a].z) && tiles.covers(nodes[l.b].x, nodes[l.b].z)));
+    const strokeRoads = (links: typeof bare, width: (lanes: number) => number, colour: string) => {
       g.strokeStyle = colour;
-      for (const l of roads.links) {
+      for (const l of links) {
         const a = nodes[l.a];
         const b = nodes[l.b];
         g.lineWidth = width(l.lanesAB + l.lanesBA);
@@ -201,21 +217,24 @@ export class WorldMap {
         g.stroke();
       }
     };
-
-    // Island land mass base
-    strokeRoads(() => LAND_WIDTH, '#16332d');
-    strokeRoads(() => LAND_WIDTH * 0.65, '#234a3f');
+    // Island land mass faked from the streets, only for islands without map images
+    const landless = bare.filter((l) => !tiles.covers(nodes[l.a].x, nodes[l.a].z) && !tiles.covers(nodes[l.b].x, nodes[l.b].z));
+    strokeRoads(landless, () => LAND_WIDTH, '#16332d');
+    strokeRoads(landless, () => LAND_WIDTH * 0.65, '#234a3f');
     // Road asphalt and street outlines
-    strokeRoads((lanes) => Math.max(2.8 / this.scale, 4.5 * Math.max(1, lanes)), '#3a4454');
-    strokeRoads((lanes) => Math.max(1.8 / this.scale, 3.2 * Math.max(1, lanes)), '#e0e6ed');
+    strokeRoads(bare, (lanes) => Math.max(2.8 / this.scale, 4.5 * Math.max(1, lanes)), '#3a4454');
+    strokeRoads(bare, (lanes) => Math.max(1.8 / this.scale, 3.2 * Math.max(1, lanes)), tiles.any ? '#8894a6' : '#e0e6ed');
 
     const ex = this.extras;
     if (ex?.route && ex.route.length > 1) {
-      g.strokeStyle = '#ff2bd6';
-      g.lineWidth = Math.max(4 / this.scale, 8);
       g.beginPath();
       g.moveTo(ex.route[0].x, ex.route[0].z);
       for (const p of ex.route) g.lineTo(p.x, p.z);
+      g.strokeStyle = 'rgba(40, 0, 32, 0.85)';
+      g.lineWidth = Math.max(7 / this.scale, 12);
+      g.stroke();
+      g.strokeStyle = '#ff2bd6';
+      g.lineWidth = Math.max(4 / this.scale, 8);
       g.stroke();
     }
     g.restore();

@@ -88,6 +88,7 @@ async function main(): Promise<void> {
   // Dim fill light riding with the camera, so the player car's rear isn't a black silhouette
   cam.camera.add(new THREE.PointLight(0xa8b8ff, 30, 16, 1.5));
   scene.add(cam.camera);
+  atmosphere.castShadows(renderer, cam.camera);
   const fx = new PostFX(renderer, scene, cam.camera, atmosphere.look.bloom);
   const skids = new SkidMarks(scene);
   const smoke = new WreckSmoke(scene);
