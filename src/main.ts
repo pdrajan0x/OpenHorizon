@@ -17,6 +17,7 @@ import { Ocean, SEA_LEVEL } from './ocean';
 import { WorldMap } from './worldmap';
 import { Stunts } from './stunts';
 import { Traffic } from './traffic';
+import { WreckSmoke } from './damage';
 import { ensureHero, loadGarage, loadTrafficModels } from './garage';
 import { GARAGE } from './tuning';
 
@@ -26,9 +27,15 @@ const REAR_WHEELS = [2, 3];
 const UPSIDE_DOWN_RESET_SECONDS = 2;
 const TRAFFIC_CARS = 24;
 const DENT_DV = 3; // m/s of velocity change in one step that leaves a mark on the body
-const CRASH_SECONDS = 2.6; // real seconds of crash cam before driving on
+const CRASH_SECONDS = 2.2; // real seconds of crash cam before driving on from where the car stopped
 const CRASH_SLOW_SECONDS = 1.6;
 const CRASH_TIME_SCALE = 0.3;
+// Wear: a crash costs this much of the car's health, plus more the faster it was going; plain dents a
+// little. Around five hard crashes total a car.
+const CRASH_WEAR = 0.1;
+const CRASH_WEAR_PER_MS = 0.004; // per m/s of speed going into the crash
+const DENT_WEAR_PER_MS = 0.003; // per m/s of velocity change above DENT_DV
+const WRECK_SECONDS = 2.5; // wreck cam before the "new car" prompt
 const TAKEDOWN_SLOW_SECONDS = 0.7;
 const TAKEDOWN_TIME_SCALE = 0.4;
 const HELD: Controls = { throttle: 0, brake: 1, steer: 0, handbrake: false, boost: false };
@@ -83,6 +90,7 @@ async function main(): Promise<void> {
   scene.add(cam.camera);
   const fx = new PostFX(renderer, scene, cam.camera, atmosphere.look.bloom);
   const skids = new SkidMarks(scene);
+  const smoke = new WreckSmoke(scene);
   const sparks = new Sparks(scene);
   const stunts = new Stunts((x, z, fx, fz) => map.roads.laneOffset(x, z, fx, fz));
   const rivals = new RivalPack(world, scene, map.roads);
@@ -146,6 +154,13 @@ async function main(): Promise<void> {
     const pose = map.roads.roadPose(p.x, p.z, player.heading);
     place(pose.position, pose.yaw);
   };
+  // After a wreck: a new car on the nearest road
+  const newCar = () => {
+    player.repair();
+    resetPlayer();
+    wreck = null;
+    hud.banner('NEW CAR', player.tuning.name, 'info', 1.2);
+  };
 
   let switching = false;
   const switchCar = async (index: number) => {
@@ -153,7 +168,7 @@ async function main(): Promise<void> {
     switching = true;
     await ensureHero(index);
     switching = false;
-    if (events.running || crash) return;
+    if (events.running || crash || wreck) return;
     const p = player.body.translation();
     const v = player.body.linvel();
     const old = player;
@@ -166,35 +181,33 @@ async function main(): Promise<void> {
     audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   };
 
-  // Crash: slow-motion orbit of the wreck, then back on the road still rolling
-  let crash: { t: number; speed: number; heading: number } | null = null;
+  // Crash: slow-motion orbit of the crash, then you drive on from where the car ended up, dented and a
+  // little slower. Crashes add up: enough of them total the car (a wreck), and only then is there a new one.
+  let crash: { t: number } | null = null;
+  let wreck: { t: number; prompted: boolean } | null = null;
   let takedownSlow = 0;
+  const startWreck = (sunk = false) => {
+    if (wreck) return;
+    if (!player.destroyed) player.wear(1);
+    wreck = { t: 0, prompted: false };
+    crash = null;
+    hud.banner(sunk ? 'SUNK' : 'WRECKED', player.tuning.name, 'crash', WRECK_SECONDS);
+  };
   const startCrash = (speed: number) => {
-    crash = { t: 0, speed, heading: player.heading };
     player.drift.crashed();
     const p = player.body.translation();
     sparks.burst(new THREE.Vector3(p.x, p.y + 0.6, p.z).addScaledVector(player.forward, 2), player.forward.clone().negate(), 90, 10);
     audio.crash(Math.min(1, speed / 40));
-    hud.banner('CRASH', '', 'crash', 1.8);
+    if (player.wear(CRASH_WEAR + CRASH_WEAR_PER_MS * speed)) {
+      startWreck();
+      return;
+    }
+    crash = { t: 0 };
+    hud.banner('CRASH', `CAR ${Math.round(player.health * 100)}%`, 'crash', 1.8);
   };
   const endCrash = () => {
-    const c = crash!;
-    const p = player.body.translation();
-    // Back on the road a little behind the wreck, facing the way we were going unless that's a wall
-    const respawnPose = (heading: number, shift: number) => {
-      const pose = map.roads.roadPose(p.x, p.z, heading);
-      const fwd = new THREE.Vector3(Math.cos(pose.yaw), 0, -Math.sin(pose.yaw));
-      pose.position.addScaledVector(fwd, shift);
-      const eye = pose.position.clone().setY(pose.position.y + 0.5);
-      return { ...pose, fwd, clear: clearance(eye, eye.clone().addScaledVector(fwd, 40)) };
-    };
-    let pose = respawnPose(c.heading, -8);
-    if (pose.clear < 40) pose = respawnPose(c.heading + Math.PI, 8); // dead end: turn around, away from the wall
-    place(pose.position, pose.yaw);
-    player.damage.repair(); // Burnout hands you a fresh car after a crash
-    const v = Math.max(12, c.speed * 0.5);
-    player.body.setLinvel({ x: pose.fwd.x * v, y: 0, z: pose.fwd.z * v }, true);
     crash = null;
+    cam.snap();
   };
   const onTakedown = (r: Rival) => {
     stunts.takedown(player);
@@ -245,8 +258,12 @@ async function main(): Promise<void> {
     }
 
     const { controls, actions } = input.update(dt);
-    if (actions.car !== null && actions.car !== carIndex && !events.running && !crash) void switchCar(actions.car);
-    if (actions.reset && !crash) resetPlayer();
+    if (actions.car !== null && actions.car !== carIndex && !events.running && !crash && !wreck) void switchCar(actions.car);
+    if (actions.reset && !crash) {
+      if (wreck) {
+        if (wreck.prompted) newCar();
+      } else resetPlayer();
+    }
     if (actions.camera) {
       const mode = cam.toggle();
       const labels: Record<string, string> = {
@@ -261,8 +278,14 @@ async function main(): Promise<void> {
     if (actions.fps) hud.toggleFps();
     if (actions.help) hud.toggleHelp();
 
-    const frozen = events.update(dt, { player, controls, quit: actions.quit, stunts, rivals, traffic, place });
-    const drive = crash ? LIMP : frozen ? HELD : controls;
+    // Events start with a fresh car
+    const eventPlace = (position: THREE.Vector3, yaw: number) => {
+      player.repair();
+      wreck = null;
+      place(position, yaw);
+    };
+    const frozen = events.update(dt, { player, controls, quit: actions.quit, stunts, rivals, traffic, place: eventPlace });
+    const drive = crash || wreck ? LIMP : frozen ? HELD : controls;
     const timeScale = crash && crash.t < CRASH_SLOW_SECONDS ? CRASH_TIME_SCALE : takedownSlow > 0 ? TAKEDOWN_TIME_SCALE : 1;
     takedownSlow -= dt;
 
@@ -288,12 +311,13 @@ async function main(): Promise<void> {
       if (hit > DENT_DV) {
         player.applyDamage(world, hit);
         audio.bump(Math.min(1, (hit - DENT_DV) / 8));
+        if (!wreck && player.wear(DENT_WEAR_PER_MS * (hit - DENT_DV))) startWreck();
       }
-      if (!crash && !frozen) {
+      if (!crash && !wreck && !frozen) {
         const shielded = rivals.rivals.some((r) => r.touchingPlayer(simTime));
         if (stunts.step(player, simTime, speedBefore, h, shielded)) startCrash(speedBefore);
-        // Off the edge of an island: into the sea, back on the nearest road
-        else if (player.body.translation().y < SEA_LEVEL - 1.5) startCrash(speedBefore);
+        // Off the edge of an island: into the sea, and that car is gone
+        else if (player.body.translation().y < SEA_LEVEL - 1.5) startWreck(true);
       }
       for (const [id, wheel] of REAR_WHEELS.entries()) {
         skids.update(id, player.skidAmount > 0.3 ? player.contactPoint(wheel, contact) : null);
@@ -306,13 +330,23 @@ async function main(): Promise<void> {
 
     const p = player.body.translation();
     playerPos.set(p.x, p.y, p.z);
-    upsideDown = player.up.y < 0.3 && player.speed < 3 && !crash ? upsideDown + dt : 0;
+    upsideDown = player.up.y < 0.3 && player.speed < 3 && !crash && !wreck ? upsideDown + dt : 0;
     const nearestNode = map.roads.nearestNode(p.x, p.z);
     const roadY = map.roads.nodes[nearestNode].y;
-    const fellThrough = p.y < roadY - 25 || p.y < -50;
-    if (upsideDown > UPSIDE_DOWN_RESET_SECONDS || fellThrough) {
-      resetPlayer();
+    // Through a hole in the city's collision: nothing to stand on, so back to the road
+    const fellThrough = !wreck && p.y > SEA_LEVEL - 1 && (p.y < roadY - 25 || p.y < -50);
+    if (fellThrough) resetPlayer();
+    // On its roof: back on its wheels where it is (a crash doesn't move you anywhere)
+    if (upsideDown > UPSIDE_DOWN_RESET_SECONDS) {
+      player.rightUp();
       upsideDown = 0;
+    }
+    if (wreck) {
+      wreck.t += dt;
+      if (!wreck.prompted && wreck.t > WRECK_SECONDS) {
+        wreck.prompted = true;
+        hud.banner('WRECKED', 'Press R for a new car', 'crash', Infinity);
+      }
     }
     if (!crash) {
       stunts.nearMisses(player, [...traffic.nearby(p.x, p.z, 20), ...rivals.agents()], simTime);
@@ -329,7 +363,10 @@ async function main(): Promise<void> {
     player.syncVisuals();
     rivals.syncVisuals();
     sparks.update(dt * timeScale);
-    if (crash) {
+    smoke.update(dt * timeScale, [player.damage, ...rivals.rivals.map((r) => r.car.damage)]);
+    if (wreck && wreck.t < WRECK_SECONDS) {
+      cam.crash(wreck.t, player, clearance);
+    } else if (crash) {
       cam.crash(crash.t, player, clearance);
       crash.t += dt;
       if (crash.t > CRASH_SECONDS) endCrash();
@@ -378,6 +415,8 @@ async function main(): Promise<void> {
       trafficWrecked: t.wrecked,
       trafficAvgSpeed: t.avgSpeed,
       crashed: crash !== null,
+      wrecked: wreck !== null,
+      health: player.health,
       event: events.running ? `${events.running.def.id}:${events.running.phase}` : '',
       takedowns: events.running?.takedowns ?? 0,
       rivals: rivals.rivals.length,

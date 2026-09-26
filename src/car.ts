@@ -14,6 +14,10 @@ const GRAVITY = 9.81;
 // Rapier rotates a steered wheel about +Y, which turns +X toward -Z (left); our steer input is +right
 const STEER_SIGN = -1;
 
+const WORN_POWER = 0.55; // share of engine force a car with no health left has lost
+const WORN_TOP_SPEED = 0.35; // share of top speed lost
+const WORN_PULL = 0.05; // rad/s of steering drift at full wear
+
 const AIR_LEVELING = 2500; // N·m per radian of tilt while airborne
 const AIR_DAMPING = 800;
 
@@ -42,11 +46,16 @@ export class Car {
   braking = false;
   skidAmount = 0; // 0..1, drives skid marks and tire audio
   powerScale = 1; // engine force multiplier (rival catch-up)
+  /** 1 = factory fresh, 0 = totaled. Crashes and hard hits wear it down; a worn car is slower and pulls to one side. */
+  health = 1;
+  /** Totaled: the engine is dead and the car only rolls. Only a new car (repair()) brings it back. */
+  destroyed = false;
   readonly forward = new THREE.Vector3();
   readonly up = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
 
   private steerAngle = 0;
+  private pull = 0; // steering bias a bent chassis gives, -1..1 (set by the first real hit)
   private prevSlip = 0;
   private prevHandbrake = false;
   private readonly mounts: THREE.Vector3[];
@@ -130,21 +139,25 @@ export class Car {
     const maxDelta = t.steerRate * (drifting ? 2 : 1) * dt;
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -maxDelta, maxDelta);
 
+    // A bent car pulls to one side and loses power; a totaled one has none
+    const worn = 1 - this.health;
+    this.steerAngle += this.pull * worn * WORN_PULL * dt * Math.min(1, this.speed / 10);
+    const power = this.destroyed ? 0 : 1 - worn * WORN_POWER;
     const fwd = this.forwardSpeed;
     const wantsReverse = c.brake > 0.1 && c.throttle < 0.1 && fwd < 1.0;
     const wantsBrakeReverse = c.throttle > 0.1 && c.brake < 0.1 && fwd < -0.5;
     let drive = 0;
     let brake = 0;
     if (wantsReverse) {
-      drive = fwd > -t.reverseTopSpeed ? -t.reverseForce * c.brake : 0;
+      drive = fwd > -t.reverseTopSpeed ? -t.reverseForce * c.brake * power : 0;
     } else if (wantsBrakeReverse) {
       brake = t.brakeForce * c.throttle;
     } else if (c.brake > 0.1) {
       brake = t.brakeForce * c.brake;
     } else if (c.throttle > 0) {
-      drive = t.engineForce * this.powerScale * c.throttle * fade(fwd, t.topSpeed);
+      drive = t.engineForce * this.powerScale * power * c.throttle * fade(fwd, t.topSpeed * (1 - worn * WORN_TOP_SPEED));
     }
-    if (this.drift.boosting) drive += t.boostForce * fade(fwd, t.boostTopSpeed);
+    if (this.drift.boosting && !this.destroyed) drive += t.boostForce * fade(fwd, t.boostTopSpeed);
     if (drive === 0 && brake === 0) brake = t.coastBrake;
     this.braking = (c.brake > 0.1 && !wantsReverse) || wantsBrakeReverse;
 
@@ -269,6 +282,39 @@ export class Car {
     if (!this.vehicle.wheelIsInContact(i)) return null;
     const p = this.vehicle.wheelContactPoint(i);
     return p ? target.set(p.x, p.y, p.z) : null;
+  }
+
+  /**
+   * Wear from a hit: `amount` 0..1 of the car's health. Returns true when this hit totals it. The body
+   * dents separately (applyDamage); this is what the hits add up to.
+   */
+  wear(amount: number): boolean {
+    if (this.destroyed || amount <= 0) return false;
+    if (this.pull === 0) this.pull = Math.random() < 0.5 ? -1 : 1;
+    this.health = Math.max(0, this.health - amount);
+    if (this.health > 0) return false;
+    this.destroyed = true;
+    this.drift.reset();
+    this.damage.totaled();
+    return true;
+  }
+
+  /** A fresh car: undented, full health. */
+  repair(): void {
+    this.health = 1;
+    this.destroyed = false;
+    this.pull = 0;
+    this.damage.repair();
+  }
+
+  /** Back on the wheels where the car is, e.g. after a rollover: keeps position and heading. */
+  rightUp(): void {
+    const p = this.body.translation();
+    this.body.setTranslation({ x: p.x, y: p.y + 1.2, z: p.z }, true);
+    this.body.setRotation(new THREE.Quaternion().setFromAxisAngle(UP, -this.heading), true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.readState();
   }
 
   reset(position: THREE.Vector3, yaw: number): void {

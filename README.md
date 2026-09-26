@@ -13,7 +13,9 @@ and authors are listed in `assets/mods.json` and `assets/CREDITS.md`.
 
 ## Set up the assets
 
-Needs Node, the .NET 10 SDK, `bsdtar` and (for audio) `ffmpeg`.
+Needs Node, the .NET 10 SDK, `bsdtar` and (for audio) `ffmpeg`. On Ubuntu 24.04:
+`sudo apt-get install dotnet-sdk-10.0 libarchive-tools ffmpeg`. `node scripts/fetch-environment.mjs`
+downloads the skies and water. See `docs/HANDOFF.md` for the work in progress and the mods still wanted.
 
 ```sh
 npm install
@@ -67,19 +69,33 @@ one converted car.
 | Quit an event | Backspace / Esc | |
 | Switch car (free roam) | 1–9 | |
 | Camera (chase / cockpit) | C | Y |
-| Back to the road | R | Back |
+| Back to the road · new car after a wreck | R | Back |
 | FPS counter / help | F / H | |
 
 Dangerous driving fills the four-segment boost meter: drifting, near misses with traffic, driving
 in the oncoming lanes, air time, and takedowns. Only full segments can be spent: tap boost for one
 segment, hold to chain them, or bank them for later. A hard hit is a crash: slow-motion crash cam,
-then you're back on the road in a fresh car, still rolling. Hits dent the bodywork.
+then you drive on from wherever the car ended up. Nothing is repaired: every crash and hard hit dents
+the body and wears the car down (the bar under the boost meter), so it gets slower, pulls to one side
+and smokes. Around five hard crashes total it: a wreck, and only then does R give you a new car on the
+nearest road. Driving off an island into the sea sinks the car. Events start with a fresh car.
 
 Events wait at the city's intersections (colored dots on the minimap):
 
 - **Race** (cyan): first to a district of the city against four rivals, by any route. The minimap shows a GPS route.
 - **Road Rage** (red): take down enough rivals before the clock runs out. Shove them into walls and traffic.
 - **Stunt Run** (yellow): chain drifts, near misses, oncoming and air into a score before time's up.
+
+## Without the mods (test world)
+
+```sh
+node scripts/make-test-world.mjs   # synthetic box cities, box cars, sky and sounds → .build/test-public/
+TEST_WORLD=1 npm run dev           # play it; TEST_WORLD=1 also works for npm run smoke and scripts/probe.mjs
+```
+
+It looks nothing like the game; it exists so the game runs (and can be tested) in a checkout with no
+mods downloaded. The test scripts find a Chromium via `scripts/browser.mjs` ($CHROMIUM, /usr/bin/chromium
+or Playwright's bundled one) and fall back to software WebGL when there's no GPU.
 
 ## Checks
 
