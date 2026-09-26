@@ -234,7 +234,7 @@ function writeReady(entries) {
 
 async function main() {
   const all = JSON.parse(readFileSync(MODS_JSON, 'utf8'));
-  const selected = all.filter((e) => (!ids.length || ids.includes(e.id)) && (!category || e.category === category) && e.fileUrl && !e.rejected);
+  const selected = all.filter((e) => (!ids.length || ids.includes(e.id)) && (!category || e.category === category) && e.fileUrl && !e.rejected && !e.fetchedBy); // fetchedBy: another script downloads it
   const planned = selected.reduce((s, e) => s + totalBytes(e), 0);
   console.log(`${selected.length} entries selected, ${mb(planned)} of archives (budget ${mb(BUDGET)})`);
   if (planned > BUDGET) throw new Error('selection exceeds MODS_BUDGET_GB');

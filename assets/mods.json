@@ -12,7 +12,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.94/5 (18 votes), 100k downloads. HQ exterior, MQ interior, glowing rims paint, animated aero. Author: \"Don't reupload and/or edit without my permission\".",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "lambo-huracan-performante",
@@ -27,7 +27,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.8/5 (92 votes), 578k downloads. High detailed model, full engine bay/door sills/trunk, dirt map.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "lambo-centenario",
@@ -42,7 +42,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.91/5 (224 votes). Reconverted from Forza Horizon 4 (+CSR2/NFS No Limits/AC parts). HQ exterior/interior/3D engine, FiveM compatible, optimized textures.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "ferrari-sf90",
@@ -57,7 +57,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.93/5 (58 votes). 'Reworked 1.0' updated 2026-02: new vertex AO, body/interior materials, wheels, lightmaps. LODs.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "ferrari-812-superfast",
@@ -72,7 +72,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.87/5 (86 votes), 219k downloads. Model from CSR2 + Assetto Corsa/FH3/FM7 parts. Add-on spawn F812, replace italigtb2. 5 liveries.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "ferrari-fxx-k",
@@ -87,7 +87,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.82/5 (62 votes), 229k downloads. HQ interior/exterior, 3D engine, auto spoiler, tuning parts, 3 liveries.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "bugatti-chiron",
@@ -102,7 +102,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.9/5 (155 votes), 405k downloads. HQ interior/exterior, 3D engine and undercarriage, working auto-spoiler.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "bugatti-divo",
@@ -117,7 +117,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.98/5 (46 votes), 160k downloads. HQ exterior/interior/engine/trunk, autospoiler.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "bugatti-bolide",
@@ -132,7 +132,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.85/5 (36 votes), 175k downloads. HQ interior/exterior, dirt mapping, FiveM resource.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-tokyo-shinjuku",
@@ -147,7 +147,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE. 4.26/5 (17 votes). CityEngine-generated street grid for the whole Shinjuku district plus hand-modelled real landmarks (Mode Gakuen Cocoon Tower, NTT Docomo Yoyogi, Sompo Japan, Tokyo Metropolitan Government Bldg, Shinjuku Center/Mitsui/Sumitomo). Beta 0.1: known vertex-shading shadow artifacts. Needs No Boundary Limits in-game (far from LS).",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-shibuya",
@@ -162,7 +162,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.82/5 (47 votes), featured. Neon signs with LOD+SLOD, light-up signs, distant lights, split collision (FiveM-ready), optional traffic path nodes (nodes548.ynd). Located west of LS. Author: 'DO NOT REUPLOAD HERE OR ANYWHERE ELSE'.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-hong-kong",
@@ -177,7 +177,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "Real-city-inspired racing environment (GRID 2 Hong Kong). 4.57/5 (14 votes). v1.1 at X -7000 Y -6000 Z 500. A paid 'Ultimate Edition' exists (hipolink) - not fetched.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "bld-grandcyberpunk",
@@ -226,7 +226,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (Chicago). 4.14/5 (62 votes), 61k downloads. 'Complete map Experiment' = Chicago as an island; Jan 2026 build. Christmas update adds emissive night lights and a building-collision hotfix. Legacy version adds to the map; Enhanced version replaces the base map.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-fukuoka-expressway",
@@ -241,7 +241,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (urban highway past the Fukuoka beaches). 4.84/5 (37 votes). v2.1: traffic path nodes, lighting (lodlights/distant lights), redone collisions, road normal/spec, instanced section loading, geometry halved. Located far NW of Paleto Bay.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-monaco-gp",
@@ -256,7 +256,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (Monaco city streets / F1 circuit) on a custom mountainous island SW of LSIA, plus a highway to a large asphalt square. 4.78/5 (32 votes). Low-end-PC friendly.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-dubai-highway",
@@ -271,7 +271,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.92/5 (24 votes). 10 km straight, 7 lanes each way, heavy traffic, Dubai skyline. At X 5000 Y 5000 Z 20.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-nfsu2-bayview",
@@ -286,7 +286,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "Not a real place, but the classic neon street-racing city. 3.84/5 (28 votes). Total map conversion via the GTA IV port.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-dubai-islands",
@@ -301,7 +301,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "Real landmark buildings but not a real street layout. 4.62/5 (63 votes), 87k downloads. V2.1 collision fix. Paid VIP version (Patreon) not fetched.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "map-midnight-shuto",
@@ -316,7 +316,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (Tokyo expressway at night). 3.75/5 (18 votes). Total conversion that replaces the GTA V base map. Hosted on Mediafire (1.13 GB); the script scrapes the short-lived direct link.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-quadra-vtech",
@@ -331,7 +331,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.44/5 (9) votes), 13,341 downloads. Model from Forza Horizon 4 (the Quadra V-Tech was a CP77 tie-in car). HQ interior, working dials, FiveM ready.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-rayfield-caliburn",
@@ -346,7 +346,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.98/5 (31) votes), 12,938 downloads. All LODs, custom vehiclelayouts, auto spoiler, bulletproof shell. Spawn name caliburn.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-type66-pack",
@@ -361,7 +361,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.95/5 (19) votes), 12,289 downloads. 4 separate cars ripped from Cyberpunk 2077. Dirt mapped, breakable windows, tuning parts, liveries (640 TS). Add-On + FiveM.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-mizutani-shion",
@@ -376,7 +376,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.93/5 (7) votes), 1,752 downloads. Model from Cyberpunk 2077. 3D engine/trunk/underside, dirt map, template. No working HUD/dials.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-archer-hella-ncpd",
@@ -391,7 +391,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "5.0/5 (31) votes), 9,375 downloads. Model from Cyberpunk 2077. Police items are extras - remove them for a civilian Hella (usable as CP-style traffic).",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "cp-arch-nazare",
@@ -406,7 +406,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.92/5 (6) votes), 6,170 downloads. Bike (lower priority). Converted with Blender + Sollumz + WolvenKit. 3 versions, 6 colours (files replaced manually).",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "traffic-prius-taxi",
@@ -540,7 +540,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "66k downloads. Replaces the tire skid/screech sounds.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "audio-real-sounds",
@@ -554,7 +554,7 @@
     "files": [],
     "hasLoose": false,
     "notes": "Real engine sounds (accel, decel, idle, exhaust, startup) for several high-end cars.",
-    "downloaded": false
+    "downloaded": true
   },
   {
     "id": "props-lights-festive",
@@ -627,6 +627,265 @@
     "notes": "Second crash recording and glass shatter, for variety.",
     "files": [],
     "hasLoose": true,
+    "downloaded": true
+  },
+  {
+    "id": "coast-aerial-beach-01",
+    "category": "coast",
+    "title": "aerial_beach_01",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/aerial_beach_01",
+    "fileUrl": "https://api.polyhaven.com/files/aerial_beach_01",
+    "archiveBytes": 3110122,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/aerial_beach_01/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-asphalt-02",
+    "category": "coast",
+    "title": "asphalt_02",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/asphalt_02",
+    "fileUrl": "https://api.polyhaven.com/files/asphalt_02",
+    "archiveBytes": 12289570,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/asphalt_02/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-boulder-01",
+    "category": "coast",
+    "title": "boulder_01",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/boulder_01",
+    "fileUrl": "https://api.polyhaven.com/files/boulder_01",
+    "archiveBytes": 13536339,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/boulder_01/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coast-land-rocks-04",
+    "category": "coast",
+    "title": "coast_land_rocks_04",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coast_land_rocks_04",
+    "fileUrl": "https://api.polyhaven.com/files/coast_land_rocks_04",
+    "archiveBytes": 41401939,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/coast_land_rocks_04/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coast-line-01",
+    "category": "coast",
+    "title": "coast_line_01",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coast_line_01",
+    "fileUrl": "https://api.polyhaven.com/files/coast_line_01",
+    "archiveBytes": 25079398,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/coast_line_01/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coast-rocks-05",
+    "category": "coast",
+    "title": "coast_rocks_05",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coast_rocks_05",
+    "fileUrl": "https://api.polyhaven.com/files/coast_rocks_05",
+    "archiveBytes": 33576450,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/coast_rocks_05/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coast-sand-01",
+    "category": "coast",
+    "title": "coast_sand_01",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coast_sand_01",
+    "fileUrl": "https://api.polyhaven.com/files/coast_sand_01",
+    "archiveBytes": 12387050,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/coast_sand_01/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coast-sand-rocks-02",
+    "category": "coast",
+    "title": "coast_sand_rocks_02",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coast_sand_rocks_02",
+    "fileUrl": "https://api.polyhaven.com/files/coast_sand_rocks_02",
+    "archiveBytes": 13059631,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/coast_sand_rocks_02/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coastal-cliff-02",
+    "category": "coast",
+    "title": "coastal_cliff_02",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coastal_cliff_02",
+    "fileUrl": "https://api.polyhaven.com/files/coastal_cliff_02",
+    "archiveBytes": 35788354,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/coastal_cliff_02/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-coastal-cliff-04",
+    "category": "coast",
+    "title": "coastal_cliff_04",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/coastal_cliff_04",
+    "fileUrl": "https://api.polyhaven.com/files/coastal_cliff_04",
+    "archiveBytes": 54095351,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/coastal_cliff_04/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-concrete-wall-008",
+    "category": "coast",
+    "title": "concrete_wall_008",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/concrete_wall_008",
+    "fileUrl": "https://api.polyhaven.com/files/concrete_wall_008",
+    "archiveBytes": 9200148,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/concrete_wall_008/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-damp-beach-sand",
+    "category": "coast",
+    "title": "damp_beach_sand",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/damp_beach_sand",
+    "fileUrl": "https://api.polyhaven.com/files/damp_beach_sand",
+    "archiveBytes": 12645441,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/damp_beach_sand/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-gray-rocks",
+    "category": "coast",
+    "title": "gray_rocks",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/gray_rocks",
+    "fileUrl": "https://api.polyhaven.com/files/gray_rocks",
+    "archiveBytes": 14397969,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/gray_rocks/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-namaqualand-boulder-02",
+    "category": "coast",
+    "title": "namaqualand_boulder_02",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/namaqualand_boulder_02",
+    "fileUrl": "https://api.polyhaven.com/files/namaqualand_boulder_02",
+    "archiveBytes": 13002615,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/namaqualand_boulder_02/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-rock-09",
+    "category": "coast",
+    "title": "rock_09",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/rock_09",
+    "fileUrl": "https://api.polyhaven.com/files/rock_09",
+    "archiveBytes": 5820522,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/rock_09/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-rock-boulder-dry",
+    "category": "coast",
+    "title": "rock_boulder_dry",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/rock_boulder_dry",
+    "fileUrl": "https://api.polyhaven.com/files/rock_boulder_dry",
+    "archiveBytes": 11634591,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/rock_boulder_dry/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-rock-face-03",
+    "category": "coast",
+    "title": "rock_face_03",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/rock_face_03",
+    "fileUrl": "https://api.polyhaven.com/files/rock_face_03",
+    "archiveBytes": 13534580,
+    "format": "jpg-pbr-2k",
+    "notes": "2k Diffuse/nor_gl/Rough/AO JPGs in public/mods/coast/rock_face_03/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "coast-sand-rocks-small-01",
+    "category": "coast",
+    "title": "sand_rocks_small_01",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/sand_rocks_small_01",
+    "fileUrl": "https://api.polyhaven.com/files/sand_rocks_small_01",
+    "archiveBytes": 30956212,
+    "format": "gltf-2k",
+    "notes": "2k glTF + bin + textures in public/mods/coast/sand_rocks_small_01/ via scripts/fetch-environment.mjs",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "sky-night-city",
+    "category": "sky",
+    "title": "Shanghai Bund (night city HDRI)",
+    "author": "Poly Haven (CC0)",
+    "pageUrl": "https://polyhaven.com/a/shanghai_bund",
+    "fileUrl": "https://api.polyhaven.com/files/shanghai_bund",
+    "archiveBytes": 25500375,
+    "format": "hdr-4k",
+    "notes": "public/mods/sky/night-city.hdr; SKIES[\"night-city\"] in fetch-environment",
+    "downloaded": true,
+    "fetchedBy": "scripts/fetch-environment.mjs"
+  },
+  {
+    "id": "bridge-golden-gate-scan",
+    "category": "bridge",
+    "title": "Google Maps San Francisco Golden Gate Bridge",
+    "author": "FV Mods",
+    "pageUrl": "https://www.gta5-mods.com/maps/google-maps-san-francisco-golden-gate-bridge",
+    "fileUrl": "https://files.gta5-mods.com/uploads/google-maps-san-francisco-golden-gate-bridge/67be2e-GoogleMaps_SF_GGB_GTA5.rar",
+    "archiveBytes": 123847426,
+    "format": "gta5-dlc-rpf",
+    "notes": "Photogrammetry (Google 3D tiles) extraction of the Golden Gate Bridge + surroundings, ~2.7 km real sea suspension bridge; .mods/bridge-golden-gate-scan/x/gm_sfgg/dlc.rpf. Scan mesh, baked lighting, no clean road surface - may need collision proxy.",
     "downloaded": true
   }
 ]

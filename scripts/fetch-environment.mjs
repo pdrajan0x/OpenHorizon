@@ -11,6 +11,7 @@ export const SKIES = {
   day: 'kloofendal_48d_partly_cloudy_puresky',
   sunset: 'belfast_sunset_puresky',
   night: 'kloppenheim_02_puresky',
+  'night-city': 'shanghai_bund',
 };
 const RES = '4k';
 const WATER_NORMALS = 'https://raw.githubusercontent.com/mrdoob/three.js/r170/examples/textures/waternormals.jpg';
@@ -36,4 +37,42 @@ if (!existsSync(normals)) {
   if (!res.ok) throw new Error(`${WATER_NORMALS}: HTTP ${res.status}`);
   writeFileSync(normals, Buffer.from(await res.arrayBuffer()));
   console.log('v water normals');
+}
+
+// The coast: 2k PBR textures (sand, wet sand, cliff rock, sea wall, riprap, asphalt) and glTF rock /
+// cliff models, all CC0 from Poly Haven, into public/mods/coast/<id>/.
+export const COAST_TEXTURES = [
+  'coast_sand_01', 'damp_beach_sand', 'coast_sand_rocks_02', 'aerial_beach_01', 'rock_face_03',
+  'concrete_wall_008', 'gray_rocks', 'rock_boulder_dry', 'asphalt_02',
+];
+export const COAST_MODELS = [
+  'coastal_cliff_04', 'coastal_cliff_02', 'coast_land_rocks_04', 'coast_rocks_05', 'coast_line_01',
+  'boulder_01', 'namaqualand_boulder_02', 'rock_09', 'sand_rocks_small_01',
+];
+const MAPS = ['Diffuse', 'nor_gl', 'Rough', 'AO'];
+async function download(url, dest) {
+  if (existsSync(dest)) return;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+}
+const COAST = join(MODS, 'coast');
+for (const id of [...COAST_TEXTURES, ...COAST_MODELS]) {
+  const files = await fetch(`https://api.polyhaven.com/files/${id}`).then((r) => r.json());
+  const out = join(COAST, id);
+  const jobs = [];
+  if (COAST_TEXTURES.includes(id)) {
+    for (const m of MAPS) {
+      const f = files[m]?.['2k']?.jpg;
+      if (f) jobs.push([f.url, join(out, `${id}_${m}_2k.jpg`)]);
+    }
+  } else {
+    const g = files.gltf['2k'].gltf;
+    jobs.push([g.url, join(out, g.url.split('/').pop())]);
+    for (const [path, f] of Object.entries(g.include ?? {})) jobs.push([f.url, join(out, path)]);
+  }
+  if (jobs.every(([, d]) => existsSync(d))) { console.log(`= coast ${id}`); continue; }
+  await Promise.all(jobs.map(([u, d]) => download(u, d)));
+  console.log(`v coast ${id} (${jobs.length} files)`);
 }

@@ -54,6 +54,29 @@ rights holders).
 - [Better Crash Sounds (BeamNG.drive)](https://www.beamng.com/resources/better-crash-sounds-completed.2554/) by Sugarking22795
 - [Alpha - Crash Sound Mod (BeamNG.drive)](https://www.beamng.com/resources/crash-sound-mod.2984/) by DriftTuner
 
+## Coast, sky and bridges
+
+- [aerial_beach_01](https://polyhaven.com/a/aerial_beach_01) by Poly Haven (CC0)
+- [asphalt_02](https://polyhaven.com/a/asphalt_02) by Poly Haven (CC0)
+- [boulder_01](https://polyhaven.com/a/boulder_01) by Poly Haven (CC0)
+- [coast_land_rocks_04](https://polyhaven.com/a/coast_land_rocks_04) by Poly Haven (CC0)
+- [coast_line_01](https://polyhaven.com/a/coast_line_01) by Poly Haven (CC0)
+- [coast_rocks_05](https://polyhaven.com/a/coast_rocks_05) by Poly Haven (CC0)
+- [coast_sand_01](https://polyhaven.com/a/coast_sand_01) by Poly Haven (CC0)
+- [coast_sand_rocks_02](https://polyhaven.com/a/coast_sand_rocks_02) by Poly Haven (CC0)
+- [coastal_cliff_02](https://polyhaven.com/a/coastal_cliff_02) by Poly Haven (CC0)
+- [coastal_cliff_04](https://polyhaven.com/a/coastal_cliff_04) by Poly Haven (CC0)
+- [concrete_wall_008](https://polyhaven.com/a/concrete_wall_008) by Poly Haven (CC0)
+- [damp_beach_sand](https://polyhaven.com/a/damp_beach_sand) by Poly Haven (CC0)
+- [gray_rocks](https://polyhaven.com/a/gray_rocks) by Poly Haven (CC0)
+- [namaqualand_boulder_02](https://polyhaven.com/a/namaqualand_boulder_02) by Poly Haven (CC0)
+- [rock_09](https://polyhaven.com/a/rock_09) by Poly Haven (CC0)
+- [rock_boulder_dry](https://polyhaven.com/a/rock_boulder_dry) by Poly Haven (CC0)
+- [rock_face_03](https://polyhaven.com/a/rock_face_03) by Poly Haven (CC0)
+- [sand_rocks_small_01](https://polyhaven.com/a/sand_rocks_small_01) by Poly Haven (CC0)
+- [Shanghai Bund (night city HDRI)](https://polyhaven.com/a/shanghai_bund) by Poly Haven (CC0)
+- [Google Maps San Francisco Golden Gate Bridge](https://www.gta5-mods.com/maps/google-maps-san-francisco-golden-gate-bridge) by FV Mods
+
 ## Tools
 
 - [CodeWalker](https://github.com/dexyfex/CodeWalker) by dexyfex: GTA V file formats (used by `tools/gta5conv`)

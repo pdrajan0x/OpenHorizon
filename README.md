@@ -18,29 +18,11 @@ Needs Node, the .NET 10 SDK, `bsdtar` and (for audio) `ffmpeg`. On Ubuntu 24.04:
 downloads the skies and water. See `docs/HANDOFF.md` for the work in progress and the mods still wanted.
 
 ```sh
-npm install
-git clone --depth 1 https://github.com/dexyfex/CodeWalker.git tools/vendor/CodeWalker
-(cd tools/gta5conv && dotnet build -c Release)   # the GTA V converter, on CodeWalker.Core
-
-node scripts/fetch-mods.mjs                      # download + unpack the mods listed in assets/mods.json
-node scripts/convert-cars.mjs                    # cars → .build/cars/*.glb + handling data
-node scripts/optimize-models.mjs                 # → public/mods/cars/<id>.glb (hero) and <id>_lod.glb
-C="dotnet tools/gta5conv/bin/Release/net10.0/gta5conv.dll"
-# Street props and trees: map mods place GTA's own lamp posts, traffic lights and trees without
-# shipping them, so they come from prop mods that do (the archives inside are unpacked first)
-$C rpf ".mods/props-lights-festive/x/Festive Streetlights V (free)/Festive-Streetlights-V_Yash-Kanojia.oiv.x/content/v_traffic_lights.rpf" .mods/props-lights-festive/rpf
-$C rpf .mods/props-traffic-nyc/x/LCUPDATE/Extra/props.rpf .mods/props-traffic-nyc/rpf
-$C rpf .mods/props-trees-cherry/x/cherry/v_trees.rpf .mods/props-trees-cherry/rpf
-PROPS="--props .mods/props-traffic-nyc --props .mods/props-lights-festive --props .mods/props-trees-cherry"
-$C map .mods/map-windy-city-chicago public/mods/maps/chicago --cell 250 $PROPS
-$C map .mods/map-shibuya public/mods/maps/shibuya $PROPS
-$C audio .mods/ferrari-sf90/rpf public/mods/audio/ferrari --id ferrari --kind engine
-mkdir -p public/mods/audio/crash                 # crash + glass recordings (BeamNG crash sound mods)
-cp .mods/audio-crash-better/x/art/sound/crash.ogg public/mods/audio/crash/crash-1.ogg
-cp .mods/audio-crash-alpha/x/art/sound/crash.ogg public/mods/audio/crash/crash-2.ogg
-for i in 01 02 03 05 06 07; do cp .mods/audio-crash-better/x/art/sound/glass_shatter_$i.ogg public/mods/audio/crash/glass-$i.ogg; done
-cp .mods/audio-crash-alpha/x/art/sound/glass_shatter_01.ogg public/mods/audio/crash/glass-alpha.ogg
+bash scripts/setup.sh    # toolchain, converter, all mods (assets/mods.json), skies, then every car, sound and city
 ```
+
+It's re-runnable (finished steps are skipped; `FORCE=1` re-converts) and `STEPS="maps index"` runs only some
+steps. Each city's source mod and conversion flags are in `assets/maps.json`.
 
 `gta5conv` also has `dump <file.yft>`, `rpf <dlc.rpf> <outdir>` (unpack an archive) and
 `map <dir> --inspect` for looking inside mods. A map conversion writes `missing.json` (archetypes the
