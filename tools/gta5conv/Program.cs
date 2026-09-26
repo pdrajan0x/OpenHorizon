@@ -1,4 +1,4 @@
-// GTA V asset converter for Neon Run: reads .yft/.ytd with CodeWalker.Core and writes .glb in the
+// GTA V asset converter for Open Horizon: reads .yft/.ytd with CodeWalker.Core and writes .glb in the
 // game's frame (+X forward, +Y up, +Z right). GTA's frame is +X right, +Y forward, +Z up, so every
 // position and normal maps (x, y, z) → (y, z, x), a rotation (no mirroring).
 //
@@ -518,7 +518,7 @@ class Gltf
     {
         var json = new JsonObject
         {
-            ["asset"] = new JsonObject { ["version"] = "2.0", ["generator"] = "neon-run gta5conv" },
+            ["asset"] = new JsonObject { ["version"] = "2.0", ["generator"] = "open-horizon gta5conv" },
             ["scene"] = 0,
             ["scenes"] = new JsonArray(new JsonObject { ["nodes"] = sceneNodes }),
             ["nodes"] = nodes, ["meshes"] = meshes, ["materials"] = materials, ["accessors"] = accessors,

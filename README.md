@@ -1,4 +1,4 @@
-# Neon Run
+# Open Horizon
 
 Burnout Paradise-style open-world racing through a real city at night, with a GTA 5 / Cyberpunk
 look. Real supercars (Lamborghini, Ferrari, Bugatti), living traffic, events waiting at intersections,

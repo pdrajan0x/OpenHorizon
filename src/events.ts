@@ -88,7 +88,7 @@ const GRID = [
   { lane: LANE, back: 30 },
 ];
 const RAGE_RIVALS = 4;
-const STORAGE_KEY = 'neonrun.events';
+const STORAGE_KEY = 'openhorizon.events';
 const ORDINAL = ['1ST', '2ND', '3RD', '4TH', '5TH'];
 
 interface Running {
