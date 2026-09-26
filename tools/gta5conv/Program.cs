@@ -5,7 +5,7 @@
 //   gta5conv dump <file.yft>
 //   gta5conv car <out.glb> <model.yft> [more.ytd ...] [--max-tex 2048]
 //   gta5conv rpf <dlc.rpf> <outdir>          unpack an archive into loose files
-//   gta5conv map ... / audio ...             see MapExport.cs / AudioExport.cs
+//   gta5conv map ... / audio ... / tex ...   see MapExport.cs / AudioExport.cs / TexExport.cs
 //
 // Car output: one node per car part, named after the GTA bone it moves with (chassis, bonnet,
 // door_dside_f, headlight_l…), plus wheel_lf/rf/lr/rr nodes centered on the wheel hubs. Material
@@ -27,6 +27,7 @@ static class Program
         if (args.Length >= 3 && args[0] == "rpf") { RpfExport.Run(args[1..]); return 0; }
         if (args.Length >= 2 && args[0] == "map") { MapExport.Run(args[1..]); return 0; }
         if (args.Length >= 2 && args[0] == "audio") { AudioExport.Run(args[1..]); return 0; }
+        if (args.Length >= 2 && args[0] == "tex") { TexExport.Run(args[1..]); return 0; }
         Console.Error.WriteLine("usage: gta5conv dump <file.yft> | car <out.glb> <model.yft> [textures.ytd ...] [--max-tex N]");
         return 1;
     }

@@ -8,7 +8,8 @@ const SPEED_FOR_MAX_FOV = 70; // m/s
 const FOCUS_HEIGHT = 1.3;
 const WALL_MARGIN = 0.35;
 
-export type CameraMode = 'chase' | 'cockpit';
+export type CameraMode = 'chase' | 'chase_far' | 'hood' | 'cockpit' | 'drone';
+const MODES: CameraMode[] = ['chase', 'chase_far', 'hood', 'cockpit', 'drone'];
 /** Distance from `from` toward `to` before hitting world geometry (Infinity when clear). */
 export type Clearance = (from: THREE.Vector3, to: THREE.Vector3) => number;
 
@@ -24,9 +25,11 @@ export class ChaseCamera {
   private orbit = 0;
   private snapped = false;
 
-  toggle(): void {
-    this.mode = this.mode === 'chase' ? 'cockpit' : 'chase';
+  toggle(): CameraMode {
+    const nextIdx = (MODES.indexOf(this.mode) + 1) % MODES.length;
+    this.mode = MODES[nextIdx];
     this.snapped = false;
+    return this.mode;
   }
 
   /**
@@ -75,20 +78,46 @@ export class ChaseCamera {
       return;
     }
 
+    if (this.mode === 'hood') {
+      const noseX = car.visual.chassisCenter.x + car.visual.chassisHalf.x * 0.72;
+      const hoodOffset = new THREE.Vector3(noseX, 0.78, 0);
+      this.camera.position.copy(hoodOffset).applyQuaternion(car.mesh.quaternion).add(this.carPos);
+      this.camera.lookAt(this.tmp.copy(car.forward).multiplyScalar(30).add(this.camera.position));
+      return;
+    }
+
     // Aim between the nose and the travel direction so drifts show the car's angle
     const target = this.tmp.set(car.forward.x, 0, car.forward.z).normalize();
     const vx = car.velocity.x;
     const vz = car.velocity.z;
     const flatSpeed = Math.hypot(vx, vz);
     if (flatSpeed > 4 && vx * target.x + vz * target.z > 0) {
-      const blend = 0.4 * Math.min(1, (flatSpeed - 4) / 16);
+      const blend = (this.mode === 'drone' ? 0.2 : 0.4) * Math.min(1, (flatSpeed - 4) / 16);
       target.lerp(new THREE.Vector3(vx / flatSpeed, 0, vz / flatSpeed), blend).normalize();
     }
     if (!this.snapped) this.dir.copy(target);
     else this.dir.lerp(target, 1 - Math.exp(-dt * 5)).normalize();
 
-    const distance = 5.6 + 1.5 * speedT;
-    const height = 2.1 + 0.3 * speedT;
+    let distance = 5.4 + 1.4 * speedT;
+    let height = 2.0 + 0.3 * speedT;
+    let focusHeight = FOCUS_HEIGHT;
+    let lookAhead = 3;
+    let lookTargetY = 1.1;
+
+    if (this.mode === 'chase_far') {
+      distance = 7.5 + 2.2 * speedT;
+      height = 2.8 + 0.5 * speedT;
+      focusHeight = 1.4;
+      lookAhead = 3.5;
+      lookTargetY = 1.25;
+    } else if (this.mode === 'drone') {
+      distance = 14.0 + 3.0 * speedT;
+      height = 8.5 + 1.5 * speedT;
+      focusHeight = 1.5;
+      lookAhead = 2.0;
+      lookTargetY = 0.5;
+    }
+
     const desired = this.tmp.copy(this.dir).multiplyScalar(-distance).add(this.carPos);
     desired.y += height;
     if (!this.snapped) this.pos.copy(desired);
@@ -97,7 +126,7 @@ export class ChaseCamera {
     this.snapped = true;
 
     // Pull in front of any wall between the car and the camera
-    const focus = new THREE.Vector3(this.carPos.x, this.carPos.y + FOCUS_HEIGHT, this.carPos.z);
+    const focus = new THREE.Vector3(this.carPos.x, this.carPos.y + focusHeight, this.carPos.z);
     const reach = focus.distanceTo(this.pos);
     const clear = clearance(focus, this.pos);
     const eye = clear < reach ? this.tmp.lerpVectors(focus, this.pos, Math.max(0.8, clear - WALL_MARGIN) / reach) : this.tmp.copy(this.pos);
@@ -109,6 +138,6 @@ export class ChaseCamera {
       eye.y + Math.sin(this.time * 45 + 1.3) * shake,
       eye.z + Math.sin(this.time * 41 + 2.1) * shake,
     );
-    this.camera.lookAt(this.carPos.x + this.dir.x * 3, this.carPos.y + 1.1, this.carPos.z + this.dir.z * 3);
+    this.camera.lookAt(this.carPos.x + this.dir.x * lookAhead, this.carPos.y + lookTargetY, this.carPos.z + this.dir.z * lookAhead);
   }
 }

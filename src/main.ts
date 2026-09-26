@@ -1,7 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import './style.css';
-import { Atmosphere } from './atmosphere';
+import { Atmosphere, type TimeOfDay } from './atmosphere';
 import { CarAudio } from './audio';
 import { ChaseCamera, type Clearance } from './camera';
 import { Car } from './car';
@@ -12,7 +12,9 @@ import { Input, type Controls } from './input';
 import { Minimap } from './minimap';
 import { PostFX } from './postfx';
 import { RivalPack, type Rival } from './rivals';
-import { GameMap } from './map';
+import { Islands } from './islands';
+import { Ocean, SEA_LEVEL } from './ocean';
+import { WorldMap } from './worldmap';
 import { Stunts } from './stunts';
 import { Traffic } from './traffic';
 import { ensureHero, loadGarage, loadTrafficModels } from './garage';
@@ -50,16 +52,18 @@ async function main(): Promise<void> {
   const renderer = new THREE.WebGLRenderer({ canvas, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
 
   const scene = new THREE.Scene();
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = FIXED_DT;
 
-  // The city: a GTA V map mod (?map=<id> picks another converted map)
-  const map = await GameMap.load(params.get('map') ?? 'chicago', world);
+  // The world: cities from GTA V map mods as islands in one sea (?map=<id> loads a single map on its own)
+  const map = await Islands.load(world, scene, params.get('map') ?? undefined);
   scene.add(map.root);
-  const atmosphere = new Atmosphere(scene);
+  // ?time=day|sunset|night picks the sky photograph; ?rain adds rain
+  const time = (['day', 'sunset', 'night'].includes(params.get('time') ?? '') ? params.get('time') : 'day') as TimeOfDay;
+  const [atmosphere, ocean] = await Promise.all([Atmosphere.load(renderer, scene, time, params.has('rain')), Ocean.load(scene)]);
+  map.setNight(atmosphere.look.night);
 
   // ?spawn=<event id> starts inside that event's start ring; ?at=x,z on the road nearest a map point
   const spawnParam = params.get('spawn') ?? '';
@@ -69,7 +73,6 @@ async function main(): Promise<void> {
   const spawnAt = spawnEvent ? map.roads.nodes[spawnEvent.at] : Number.isFinite(atZ) ? { x: atX, z: atZ } : map.spawn;
   const spawn = map.roads.roadPose(spawnAt.x, spawnAt.z, 0);
   await map.prime(spawn.position);
-  atmosphere.captureEnvironment(renderer, scene, spawn.position.clone().setY(spawn.position.y + 25));
   let carIndex = 0;
   let player = new Car(world, scene, GARAGE[carIndex], spawn.position, spawn.yaw, true);
   const trafficCount = params.get('traffic') === '0' ? 0 : TRAFFIC_CARS;
@@ -78,7 +81,7 @@ async function main(): Promise<void> {
   // Dim fill light riding with the camera, so the player car's rear isn't a black silhouette
   cam.camera.add(new THREE.PointLight(0xa8b8ff, 30, 16, 1.5));
   scene.add(cam.camera);
-  const fx = new PostFX(renderer, scene, cam.camera);
+  const fx = new PostFX(renderer, scene, cam.camera, atmosphere.look.bloom);
   const skids = new SkidMarks(scene);
   const sparks = new Sparks(scene);
   const stunts = new Stunts((x, z, fx, fz) => map.roads.laneOffset(x, z, fx, fz));
@@ -88,6 +91,18 @@ async function main(): Promise<void> {
   const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, map.roads);
   const audio = new CarAudio();
   const events = new Events(scene, hud, audio, map.roads, eventDefs);
+  // M: the full map; the world pauses while it's open
+  const hudElement = document.getElementById('hud')!;
+  const worldMap = new WorldMap(map, (open) => hudElement.classList.toggle('hidden', open));
+  const mapExtras = () => ({
+    events: events.mapMarkers(),
+    rivals: rivals.rivals.map((r) => {
+      const q = r.car.body.translation();
+      return new THREE.Vector3(q.x, q.y, q.z);
+    }),
+    route: events.gps(),
+    destination: events.destination(),
+  });
   audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   hud.showCar(player);
 
@@ -223,11 +238,26 @@ async function main(): Promise<void> {
   const frame = (now: number) => {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
+    if (worldMap.open) {
+      audio.update(0, 0, 0, false);
+      requestAnimationFrame(frame);
+      return;
+    }
 
     const { controls, actions } = input.update(dt);
     if (actions.car !== null && actions.car !== carIndex && !events.running && !crash) void switchCar(actions.car);
     if (actions.reset && !crash) resetPlayer();
-    if (actions.camera) cam.toggle();
+    if (actions.camera) {
+      const mode = cam.toggle();
+      const labels: Record<string, string> = {
+        chase: 'CAMERA: CLOSE CHASE',
+        chase_far: 'CAMERA: FAR CHASE',
+        hood: 'CAMERA: HOOD / BUMPER',
+        cockpit: 'CAMERA: COCKPIT / INTERIOR',
+        drone: 'CAMERA: DRONE / AERIAL',
+      };
+      hud.note(labels[mode] ?? `CAMERA: ${mode.toUpperCase()}`, 'stunt');
+    }
     if (actions.fps) hud.toggleFps();
     if (actions.help) hud.toggleHelp();
 
@@ -262,6 +292,8 @@ async function main(): Promise<void> {
       if (!crash && !frozen) {
         const shielded = rivals.rivals.some((r) => r.touchingPlayer(simTime));
         if (stunts.step(player, simTime, speedBefore, h, shielded)) startCrash(speedBefore);
+        // Off the edge of an island: into the sea, back on the nearest road
+        else if (player.body.translation().y < SEA_LEVEL - 1.5) startCrash(speedBefore);
       }
       for (const [id, wheel] of REAR_WHEELS.entries()) {
         skids.update(id, player.skidAmount > 0.3 ? player.contactPoint(wheel, contact) : null);
@@ -275,7 +307,9 @@ async function main(): Promise<void> {
     const p = player.body.translation();
     playerPos.set(p.x, p.y, p.z);
     upsideDown = player.up.y < 0.3 && player.speed < 3 && !crash ? upsideDown + dt : 0;
-    const fellThrough = p.y < map.roads.nodes[map.roads.nearestNode(p.x, p.z)].y - 20;
+    const nearestNode = map.roads.nearestNode(p.x, p.z);
+    const roadY = map.roads.nodes[nearestNode].y;
+    const fellThrough = p.y < roadY - 25 || p.y < -50;
     if (upsideDown > UPSIDE_DOWN_RESET_SECONDS || fellThrough) {
       resetPlayer();
       upsideDown = 0;
@@ -286,7 +320,8 @@ async function main(): Promise<void> {
     for (const n of stunts.notes) if (n.kind !== 'crash') hud.note(n.text, n.kind);
     stunts.notes.length = 0;
 
-    map.update(cam.camera.position, [playerPos, ...rivals.rivals.map((r) => {
+    const lookahead = playerPos.clone().addScaledVector(player.velocity, 2.5);
+    map.update(cam.camera.position, [playerPos, lookahead, ...rivals.rivals.map((r) => {
       const q = r.car.body.translation();
       return new THREE.Vector3(q.x, q.y, q.z);
     })]);
@@ -302,6 +337,7 @@ async function main(): Promise<void> {
       cam.update(dt, player, clearance);
     }
     atmosphere.update(simTime, cam.camera.position);
+    ocean.update(simTime, cam.camera.position);
     map.cull(cam.camera.position);
 
     fps.frames++;
@@ -314,15 +350,9 @@ async function main(): Promise<void> {
     hud.update(dt, player, fps.text);
     hud.setProgress(`EVENTS ${events.completed}/${events.defs.length}`);
     if (frameCount++ % 2 === 0) {
-      minimap.draw(p.x, p.z, player.heading, traffic.positions(), {
-        events: events.mapMarkers(),
-        rivals: rivals.rivals.map((r) => {
-          const q = r.car.body.translation();
-          return new THREE.Vector3(q.x, q.y, q.z);
-        }),
-        route: events.gps(),
-        destination: events.destination(),
-      });
+      const extras = mapExtras();
+      minimap.draw(p.x, p.z, player.heading, traffic.positions(), extras);
+      worldMap.setState(p.x, p.z, player.heading, extras);
     }
     audio.update(player.speed, controls.throttle, player.skidAmount, player.drift.boosting);
     fx.render();
@@ -354,6 +384,7 @@ async function main(): Promise<void> {
       rivalsWrecked: rivals.rivals.filter((r) => r.wrecked).length,
       rivalAvgSpeed: rivals.rivals.reduce((sum, r) => sum + r.car.speed, 0) / Math.max(1, rivals.rivals.length),
       rivalProgress: rivals.rivals.reduce((sum, r) => sum + r.s, 0) / Math.max(1, rivals.rivals.length),
+      camMode: cam.mode,
       stuntScore: stunts.score,
       ...nearestRival(),
       eventsDone: events.completed,

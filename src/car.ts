@@ -48,6 +48,7 @@ export class Car {
 
   private steerAngle = 0;
   private prevSlip = 0;
+  private prevHandbrake = false;
   private readonly mounts: THREE.Vector3[];
   private readonly right = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
@@ -130,11 +131,14 @@ export class Car {
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -maxDelta, maxDelta);
 
     const fwd = this.forwardSpeed;
-    const wantsReverse = c.brake > 0.1 && c.throttle < 0.1 && fwd < 1.5;
+    const wantsReverse = c.brake > 0.1 && c.throttle < 0.1 && fwd < 1.0;
+    const wantsBrakeReverse = c.throttle > 0.1 && c.brake < 0.1 && fwd < -0.5;
     let drive = 0;
     let brake = 0;
     if (wantsReverse) {
       drive = fwd > -t.reverseTopSpeed ? -t.reverseForce * c.brake : 0;
+    } else if (wantsBrakeReverse) {
+      brake = t.brakeForce * c.throttle;
     } else if (c.brake > 0.1) {
       brake = t.brakeForce * c.brake;
     } else if (c.throttle > 0) {
@@ -142,7 +146,7 @@ export class Car {
     }
     if (this.drift.boosting) drive += t.boostForce * fade(fwd, t.boostTopSpeed);
     if (drive === 0 && brake === 0) brake = t.coastBrake;
-    this.braking = c.brake > 0.1 && !wantsReverse;
+    this.braking = (c.brake > 0.1 && !wantsReverse) || wantsBrakeReverse;
 
     const drivenWheels = (t.driveFront ? 2 : 0) + (t.driveRear ? 2 : 0);
     for (let i = 0; i < 4; i++) {
@@ -151,8 +155,9 @@ export class Car {
       const driven = front ? t.driveFront : t.driveRear;
       this.vehicle.setWheelSteering(i, front ? STEER_SIGN * this.steerAngle : 0);
       this.vehicle.setWheelEngineForce(i, driven && !rearLocked ? drive / drivenWheels : 0);
-      // Rapier treats brake as a per-step impulse cap, so convert force to impulse
-      const wheelBrake = rearLocked ? Math.max(brake / 4, t.handbrakeForce / 2) : brake / 4;
+      // Front brake bias (60% front, 40% rear) gives stable bite; rear locked for handbrake
+      const axleBrake = front ? brake * 0.30 : brake * 0.20;
+      const wheelBrake = rearLocked ? Math.max(axleBrake, t.handbrakeForce / 2) : axleBrake;
       this.vehicle.setWheelBrake(i, wheelBrake * dt);
 
       let grip = front ? t.gripFront : t.gripRear;
@@ -173,6 +178,14 @@ export class Car {
     for (let i = 0; i < 4; i++) if (this.vehicle.wheelIsInContact(i)) this.wheelsInContact++;
     const grounded = this.wheelsInContact >= 2;
 
+    // Handbrake kick: immediate yaw torque impulse on tap to break the rear loose cleanly into the turn
+    const handbrakeTap = c.handbrake && !this.prevHandbrake;
+    this.prevHandbrake = c.handbrake;
+    if (handbrakeTap && Math.abs(c.steer) > 0.1 && this.speed > 4.5 && grounded) {
+      const kickYaw = -Math.sign(c.steer) * (t.mass * 22) * Math.abs(c.steer);
+      this.body.applyTorqueImpulse(this.tmp.copy(this.up).multiplyScalar(kickYaw * dt), true);
+    }
+
     // Aero drag opposes travel; downforce adds grip at speed
     if (this.speed > 0.1) {
       this.body.applyImpulse(this.tmp.copy(this.velocity).multiplyScalar((-t.drag * this.speed * dt)), true);
@@ -183,11 +196,11 @@ export class Car {
 
     const slipRate = (this.slip - this.prevSlip) / dt;
     this.prevSlip = this.slip;
-    if (drifting && grounded && this.speed > 5) {
+    if (drifting && grounded && this.speed > 4) {
       // Drift angle controller: steering picks a target slip angle (into the corner = wider, counter-steer =
       // narrower) and a damped yaw torque holds the car there, so drifts neither spin out nor snap straight.
       // Torque about +up turns the nose left, which increases slip.
-      const side = Math.abs(this.slip) > 0.1 ? Math.sign(this.slip) : -Math.sign(c.steer);
+      const side = Math.abs(this.slip) > 0.08 ? Math.sign(this.slip) : -Math.sign(c.steer);
       const into = -side * c.steer;
       const targetSlip = side * Math.max(0, t.driftAngle + into * t.driftAngleRange);
       const yaw = THREE.MathUtils.clamp(
@@ -264,6 +277,7 @@ export class Car {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.steerAngle = 0;
+    this.prevHandbrake = false;
     this.drift.reset();
     this.readState();
   }

@@ -1,6 +1,10 @@
 // Map conversion: GTA V map mods → streaming cells for the game (see MapWriter.cs for the format).
-//   gta5conv map <unpacked mod dir> --inspect [ydr name]   list what's inside
+//   gta5conv map <unpacked mod dir> --inspect [ydr name]   list what's inside (collision files with their
+//                                                          flat area per material type)
+//   gta5conv map <unpacked mod dir> --inspect --tex-area   flat render area per texture (finding road textures)
 //   gta5conv map <unpacked mod dir> <outdir> [--cell 200] [--max-tex 1024] [--props <prop mod dir>]…
+//        [--all-col] [--crop <m>] [--drop-water] [--render-col <regex>]
+//        [--road-col <regex>] [--road-mat <n,…>] [--road-tex <regex>]   (see MapWriter.cs)
 using CodeWalker.GameFiles;
 using SharpDX;
 
@@ -15,11 +19,13 @@ static class MapExport
         {
             if (args[i] == "--inspect") inspect = true;
             else if (args[i] == "--props") props.Add(args[++i]);
-            else if (args[i] is "--cell" or "--max-tex") i++;
+            else if (args[i] is "--cell" or "--max-tex" or "--crop" or "--road-col" or "--road-mat" or "--road-tex" or "--render-col") i++;
+            else if (args[i].StartsWith("--")) { }
             else inputs.Add(args[i]);
         }
         var mod = ModFiles.Scan(inputs[0]);
         foreach (var dir in props) mod.AddProps(ModFiles.Scan(dir));
+        if (inspect && args.Contains("--tex-area")) { TextureAreas(mod); return; }
         if (inspect && inputs.Count > 1) { InspectGeoms(mod, inputs[1]); return; }
         if (inspect) { Inspect(mod); return; }
         MapWriter.Write(mod, inputs[1], args);
@@ -51,6 +57,42 @@ static class MapExport
         if (bound is BoundComposite bc)
             foreach (var ch in bc.Children?.data_items ?? [])
                 if (ch is BoundGeometry bg) Console.WriteLine($"  child {ch.Type} polys={bg.Polygons?.Length} {bg.BoxMin}..{bg.BoxMax} mats={bg.Materials?.Length} T={ch.Transform.TranslationVector}");
+    }
+
+    /// <summary>Upward-facing render area per diffuse texture over the mod's own drawables: which textures are
+    /// road surface (for --road-tex).</summary>
+    static void TextureAreas(ModFiles mod)
+    {
+        var area = new Dictionary<string, double>();
+        var files = new Dictionary<string, HashSet<string>>();
+        foreach (var (name, path) in mod.Ydrs)
+        {
+            if (mod.PropNames.Contains(name)) continue;
+            var y = new YdrFile();
+            try { y.Load(File.ReadAllBytes(path)); } catch { continue; }
+            foreach (var model in y.Drawable?.DrawableModels?.High ?? [])
+                foreach (var g in model.Geometries ?? [])
+                {
+                    string diffuse = null;
+                    var pl = g.Shader?.ParametersList;
+                    for (int i = 0; i < (pl?.Parameters?.Length ?? 0) && diffuse == null; i++)
+                        if (pl.Parameters[i].Data is TextureBase tb && pl.Hashes[i].ToString().ToLowerInvariant().Contains("diffuse")) diffuse = tb.Name;
+                    diffuse ??= "(none)";
+                    var vd = g.VertexData; var idx = g.IndexBuffer?.Indices;
+                    if (vd == null || idx == null) continue;
+                    for (int i = 0; i + 2 < g.IndicesCount && i + 2 < idx.Length; i += 3)
+                    {
+                        var a = vd.GetVector3(idx[i], 0); var b = vd.GetVector3(idx[i + 1], 0); var c = vd.GetVector3(idx[i + 2], 0);
+                        var n = Vector3.Cross(b - a, c - a);
+                        if (n.Length() < 1e-6 || Math.Abs(n.Z) / n.Length() < 0.8) continue;
+                        area[diffuse] = area.GetValueOrDefault(diffuse) + n.Length() / 2;
+                        if (!files.TryGetValue(diffuse, out var f)) files[diffuse] = f = [];
+                        f.Add(name);
+                    }
+                }
+        }
+        foreach (var (tex, a) in area.OrderByDescending(kv => kv.Value).Take(60))
+            Console.WriteLine($"{a,12:F0} m²  {tex,-40} {files[tex].Count} drawables, e.g. {string.Join(",", files[tex].Take(4))}");
     }
 
     static void Inspect(ModFiles mod)
@@ -101,18 +143,29 @@ static class MapExport
             var y = new YbnFile(); y.Load(File.ReadAllBytes(path));
             int polys = 0, verts = 0, geoms = 0;
             var types = new Dictionary<string, int>();
+            var flatArea = new Dictionary<int, double>(); // m² of walkable/drivable (upward) triangles per material type
             void walk(Bounds b)
             {
                 if (b is BoundComposite c) { foreach (var ch in c.Children?.data_items ?? []) if (ch != null) walk(ch); }
                 else if (b is BoundGeometry g)
                 {
                     geoms++; polys += g.Polygons?.Length ?? 0; verts += g.Vertices?.Length ?? 0;
-                    foreach (var p in g.Polygons ?? []) { var t = p.Type.ToString(); types[t] = types.GetValueOrDefault(t) + 1; }
+                    for (int i = 0; i < (g.Polygons?.Length ?? 0); i++)
+                    {
+                        var p = g.Polygons[i];
+                        var t = p.Type.ToString(); types[t] = types.GetValueOrDefault(t) + 1;
+                        if (p is not BoundPolygonTriangle tri) continue;
+                        var n = Vector3.Cross(g.GetVertexPos(tri.vertIndex2) - g.GetVertexPos(tri.vertIndex1), g.GetVertexPos(tri.vertIndex3) - g.GetVertexPos(tri.vertIndex1));
+                        if (n.Length() < 1e-6 || Math.Abs(n.Z) / n.Length() < 0.8) continue;
+                        var mt = (int)g.GetMaterial(i).Type;
+                        flatArea[mt] = flatArea.GetValueOrDefault(mt) + n.Length() / 2;
+                    }
                 }
                 else { var t = b.Type.ToString(); types[t] = types.GetValueOrDefault(t) + 1; }
             }
             walk(y.Bounds);
-            Console.WriteLine($"YBN {name}: {y.Bounds?.Type} bb={y.Bounds?.BoxMin}..{y.Bounds?.BoxMax} geoms={geoms} polys={polys} verts={verts} {string.Join(",", types.Select(kv => kv.Key + "=" + kv.Value))}");
+            var mats = string.Join(" ", flatArea.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"m{kv.Key}={kv.Value:F0}"));
+            Console.WriteLine($"YBN {name}: {y.Bounds?.Type} bb={y.Bounds?.BoxMin}..{y.Bounds?.BoxMax} geoms={geoms} polys={polys} verts={verts} {string.Join(",", types.Select(kv => kv.Key + "=" + kv.Value))} flat m²: {mats}");
         }
         foreach (var (name, path) in mod.Ynds)
         {

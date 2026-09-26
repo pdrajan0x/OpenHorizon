@@ -4,19 +4,23 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-// Only HDR-bright surfaces (light bars, neon, lit windows pushed above 1) cross the threshold
-const BLOOM_STRENGTH = 0.85;
-const BLOOM_RADIUS = 0.4;
-const BLOOM_THRESHOLD = 0.9;
+// Only HDR-bright surfaces cross the threshold: at night light bars, neon and lit windows; by day,
+// when sunlit concrete is already bright, only the sun's glints and lamps
+export interface Bloom {
+  strength: number;
+  radius: number;
+  threshold: number;
+}
+const NIGHT_BLOOM: Bloom = { strength: 0.85, radius: 0.4, threshold: 0.9 };
 
 /** Scene render → bloom (half resolution internally) → tone mapping + sRGB output. */
 export class PostFX {
   private readonly composer: EffectComposer;
 
-  constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+  constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, bloom: Bloom = NIGHT_BLOOM) {
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), bloom.strength, bloom.radius, bloom.threshold));
     this.composer.addPass(new OutputPass());
   }
 

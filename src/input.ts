@@ -25,7 +25,7 @@ const KEYS = {
   handbrake: ['Space'],
   boost: ['ShiftLeft', 'ShiftRight'],
   reset: ['KeyR'],
-  camera: ['KeyC'],
+  camera: ['KeyV', 'KeyC'],
   fps: ['KeyF'],
   help: ['KeyH'],
   quit: ['Backspace', 'Escape'],

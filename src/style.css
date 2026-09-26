@@ -140,3 +140,10 @@ html, body {
   position: absolute; left: 18px; bottom: 258px; width: 220px; text-align: center;
   font-size: 12px; font-weight: 700; letter-spacing: 0.2em; color: #b9c3ff;
 }
+
+#worldmap {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 20;
+  cursor: grab;
+}
+#worldmap.hidden { display: none; }
+#hud.hidden { display: none; }

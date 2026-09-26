@@ -1,108 +1,194 @@
+// Sky and light from a photographed sky (an HDRI from Poly Haven, public/mods/sky/<time>.hdr, fetched by
+// scripts/fetch-environment.mjs): it's the backdrop, the image-based light every surface picks up, and
+// where the sun is. Haze takes its colour from the sky at the horizon. Rain is optional (?rain).
 import * as THREE from 'three';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import type { Bloom } from './postfx';
 
-const HORIZON = 0x2b1a3d;
-const FOG_DENSITY = 0.0024;
+export type TimeOfDay = 'day' | 'sunset' | 'night';
+
+interface Look {
+  exposure: number;
+  sun: number; // directional light intensity (the sky photograph lights everything else)
+  environment: number; // how strongly the photograph lights surfaces
+  fog: number; // FogExp2 density
+  night: number; // 0..1: how much lit windows and signs glow
+  bloom: Bloom;
+}
+const LOOKS: Record<TimeOfDay, Look> = {
+  day: { exposure: 0.7, sun: 1.6, environment: 0.7, fog: 0.0004, night: 0, bloom: { strength: 0.25, radius: 0.3, threshold: 4 } },
+  sunset: { exposure: 0.55, sun: 1.6, environment: 0.6, fog: 0.0004, night: 0.35, bloom: { strength: 0.45, radius: 0.35, threshold: 3 } },
+  night: { exposure: 1.8, sun: 0.2, environment: 1.4, fog: 0.0006, night: 1, bloom: { strength: 1.2, radius: 0.5, threshold: 0.7 } },
+};
+const HORIZON_BLEND = 0.05; // fraction of the photograph's height above the horizon faded into haze
 const RAIN_DROPS = 6000;
 const RAIN_BOX = 120; // meters around the camera
 const RAIN_HEIGHT = 60;
 
-/** Night sky, haze, ambient light and rain. */
 export class Atmosphere {
-  private readonly rain: THREE.ShaderMaterial;
-  private readonly sky = skyDome();
+  readonly sun = new THREE.DirectionalLight(0xffffff, 1);
+  readonly look: Look;
+  private readonly sunOffset = new THREE.Vector3();
+  private readonly rain: THREE.ShaderMaterial | null;
 
-  constructor(scene: THREE.Scene) {
-    scene.background = new THREE.Color(HORIZON);
-    scene.fog = new THREE.FogExp2(HORIZON, FOG_DENSITY);
-    scene.add(this.sky);
-    scene.add(new THREE.HemisphereLight(0x6a5aa0, 0x0c0816, 0.9));
-    const moon = new THREE.DirectionalLight(0x8a96ff, 0.5);
-    moon.position.set(-200, 400, 150);
-    scene.add(moon);
+  private constructor(scene: THREE.Scene, sky: THREE.DataTexture, environment: THREE.Texture, readonly time: TimeOfDay, rain: boolean) {
+    this.look = LOOKS[time];
+    scene.background = sky;
+    scene.environment = environment;
+    scene.environmentIntensity = this.look.environment;
 
-    this.rain = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() } },
-      vertexShader: /* glsl */ `
-        uniform float uTime;
-        uniform vec3 uCam;
-        attribute float aEnd;
-        void main() {
-          vec3 p = position;
-          p.y = mod(p.y - uTime * 26.0, ${RAIN_HEIGHT.toFixed(1)}) - 15.0 + uCam.y + aEnd * 0.9;
-          p.xz = mod(p.xz - uCam.xz + ${(RAIN_BOX / 2).toFixed(1)}, ${RAIN_BOX.toFixed(1)}) - ${(RAIN_BOX / 2).toFixed(1)} + uCam.xz;
-          p.x += aEnd * 0.1;
-          gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
-        }`,
-      fragmentShader: /* glsl */ `
-        void main() { gl_FragColor = vec4(0.65, 0.72, 1.0, 0.25); }`,
-      transparent: true,
-      depthWrite: false,
-    });
-    const positions = new Float32Array(RAIN_DROPS * 6);
-    const ends = new Float32Array(RAIN_DROPS * 2);
-    for (let i = 0; i < RAIN_DROPS; i++) {
-      const x = Math.random() * RAIN_BOX;
-      const y = Math.random() * RAIN_HEIGHT;
-      const z = Math.random() * RAIN_BOX;
-      positions.set([x, y, z, x, y, z], i * 6);
-      ends.set([0, 1], i * 2);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aEnd', new THREE.BufferAttribute(ends, 1));
-    const rain = new THREE.LineSegments(geo, this.rain);
-    rain.frustumCulled = false;
-    scene.add(rain);
+    // The sun sits where the photograph is brightest; the haze is the colour of its horizon
+    const { sun, horizon } = analyse(sky);
+    this.sunOffset.copy(sun).multiplyScalar(1000);
+    this.sun.position.copy(this.sunOffset);
+    this.sun.intensity = this.look.sun;
+    this.sun.color.copy(sunColour(sky, sun));
+    scene.add(this.sun, this.sun.target);
+    scene.fog = new THREE.FogExp2(horizon, this.look.fog);
+    this.rain = rain ? addRain(scene) : null;
+  }
+
+  static async load(renderer: THREE.WebGLRenderer, scene: THREE.Scene, time: TimeOfDay, rain = false): Promise<Atmosphere> {
+    const sky = await new HDRLoader().loadAsync(`/mods/sky/${time}.hdr`);
+    sky.mapping = THREE.EquirectangularReflectionMapping;
+    seaBelowHorizon(sky);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const environment = pmrem.fromEquirectangular(sky).texture;
+    pmrem.dispose();
+    renderer.toneMappingExposure = LOOKS[time].exposure;
+    return new Atmosphere(scene, sky, environment, time, rain);
   }
 
   update(time: number, camera: THREE.Vector3): void {
-    // The dome rides with the camera: the map can be kilometers from the origin
-    this.sky.position.copy(camera);
-    this.rain.uniforms.uTime.value = time;
-    this.rain.uniforms.uCam.value.copy(camera);
+    // The sun's light follows the camera so its direction is the same everywhere on the islands
+    this.sun.target.position.copy(camera);
+    this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
+    if (this.rain) {
+      this.rain.uniforms.uTime.value = time;
+      this.rain.uniforms.uCam.value.copy(camera);
+    }
   }
 
-  /** Photograph the lit city into an environment map, so glossy paint and wet asphalt reflect it. */
-  captureEnvironment(renderer: THREE.WebGLRenderer, scene: THREE.Scene, at: THREE.Vector3): void {
-    this.sky.position.copy(at);
-    const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
-    const camera = new THREE.CubeCamera(1, 3000, target);
-    camera.position.copy(at);
-    camera.update(renderer, scene);
-    scene.environment = new THREE.PMREMGenerator(renderer).fromCubemap(target.texture).texture;
-    scene.environmentIntensity = 1.2;
-    target.dispose();
-  }
 }
 
-function skyDome(): THREE.Mesh {
+/**
+ * The photographs are skies only; below the horizon is the sea. Beyond the camera's far plane (3 km)
+ * the ocean isn't drawn, so paint the lower half with the haze at the horizon: the sea fades into it.
+ */
+function seaBelowHorizon(sky: THREE.DataTexture): void {
+  const { data, width, height } = sky.image as { data: Uint16Array | Float32Array; width: number; height: number };
+  const { horizon } = analyse(sky);
+  const half = data instanceof Uint16Array;
+  const get = (i: number) => (half ? THREE.DataUtils.fromHalfFloat(data[i]) : data[i]);
+  const put = (i: number, v: number) => (data[i] = half ? THREE.DataUtils.toHalfFloat(v) : v);
+  // A band of sky above the horizon eases into the haze, so there's no seam
+  const blendFrom = Math.floor(height * (0.5 - HORIZON_BLEND));
+  for (let y = blendFrom; y < height; y++) {
+    const t = Math.min(1, (y - blendFrom) / (height / 2 - blendFrom));
+    const k = t * t * (3 - 2 * t);
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      put(i, get(i) + (horizon.r - get(i)) * k);
+      put(i + 1, get(i + 1) + (horizon.g - get(i + 1)) * k);
+      put(i + 2, get(i + 2) + (horizon.b - get(i + 2)) * k);
+    }
+  }
+  sky.needsUpdate = true;
+}
+
+/** Direction of the brightest pixel above the horizon, and the average colour just above the horizon. */
+function analyse(sky: THREE.DataTexture): { sun: THREE.Vector3; horizon: THREE.Color } {
+  const { data, width, height } = sky.image as { data: Uint16Array | Float32Array; width: number; height: number };
+  const half = data instanceof Uint16Array;
+  const at = (i: number) => (half ? THREE.DataUtils.fromHalfFloat(data[i]) : data[i]);
+  let best = -1;
+  let bx = 0;
+  let by = 0;
+  // Row 0 is the top of the photograph (zenith); the horizon is the middle row
+  for (let y = 0; y < height / 2; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      const i = (y * width + x) * 4;
+      const l = at(i) * 0.2126 + at(i + 1) * 0.7152 + at(i + 2) * 0.0722;
+      if (l > best) {
+        best = l;
+        bx = x;
+        by = y;
+      }
+    }
+  }
+  const sun = direction((bx + 0.5) / width, 1 - (by + 0.5) / height);
+  // Haze colour: the sky just above the horizon, leaving out the brightest tenth (the sun's glare)
+  const row = Math.floor(height * 0.47);
+  const samples: [number, number, number, number][] = [];
+  for (let x = 0; x < width; x += 4) {
+    const i = (row * width + x) * 4;
+    const r = at(i);
+    const g = at(i + 1);
+    const b = at(i + 2);
+    samples.push([r * 0.2126 + g * 0.7152 + b * 0.0722, r, g, b]);
+  }
+  samples.sort((p, q) => p[0] - q[0]);
+  const kept = samples.slice(0, Math.floor(samples.length * 0.9));
+  const horizon = new THREE.Color(0, 0, 0);
+  for (const [, r, g, b] of kept) {
+    horizon.r += r / kept.length;
+    horizon.g += g / kept.length;
+    horizon.b += b / kept.length;
+  }
+  return { sun, horizon };
+}
+
+/** The sun's colour: the photograph around it, normalised to its brightest channel. */
+function sunColour(sky: THREE.DataTexture, sun: THREE.Vector3): THREE.Color {
+  const { data, width, height } = sky.image as { data: Uint16Array | Float32Array; width: number; height: number };
+  const half = data instanceof Uint16Array;
+  const u = Math.atan2(sun.z, sun.x) / (2 * Math.PI) + 0.5;
+  const v = Math.asin(THREE.MathUtils.clamp(sun.y, -1, 1)) / Math.PI + 0.5;
+  const i = (Math.floor((1 - v) * (height - 1)) * width + Math.floor(u * (width - 1))) * 4;
+  const c = new THREE.Color(...[0, 1, 2].map((k) => (half ? THREE.DataUtils.fromHalfFloat((data as Uint16Array)[i + k]) : data[i + k])) as [number, number, number]);
+  return c.multiplyScalar(1 / Math.max(c.r, c.g, c.b, 1e-6));
+}
+
+/** World direction for equirectangular texture coordinates (three.js's equirectUv, inverted). */
+function direction(u: number, v: number): THREE.Vector3 {
+  const azimuth = (u - 0.5) * 2 * Math.PI;
+  const elevation = (v - 0.5) * Math.PI;
+  return new THREE.Vector3(Math.cos(elevation) * Math.cos(azimuth), Math.sin(elevation), Math.cos(elevation) * Math.sin(azimuth));
+}
+
+function addRain(scene: THREE.Scene): THREE.ShaderMaterial {
   const material = new THREE.ShaderMaterial({
-    uniforms: {
-      top: { value: new THREE.Color(0x05050f) },
-      mid: { value: new THREE.Color(0x160f2e) },
-      horizon: { value: new THREE.Color(HORIZON) },
-      glow: { value: new THREE.Color(0x6a2a5e) },
-    },
+    uniforms: { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() } },
     vertexShader: /* glsl */ `
-      varying vec3 vDir;
+      uniform float uTime;
+      uniform vec3 uCam;
+      attribute float aEnd;
       void main() {
-        vDir = normalize(position);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec3 p = position;
+        p.y = mod(p.y - uTime * 26.0, ${RAIN_HEIGHT.toFixed(1)}) - 15.0 + uCam.y + aEnd * 0.9;
+        p.xz = mod(p.xz - uCam.xz + ${(RAIN_BOX / 2).toFixed(1)}, ${RAIN_BOX.toFixed(1)}) - ${(RAIN_BOX / 2).toFixed(1)} + uCam.xz;
+        p.x += aEnd * 0.1;
+        gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 top, mid, horizon, glow;
-      varying vec3 vDir;
-      void main() {
-        float h = vDir.y;
-        vec3 c = mix(horizon, mid, smoothstep(0.0, 0.25, h));
-        c = mix(c, top, smoothstep(0.25, 0.8, h));
-        c += glow * exp(-abs(h) * 12.0) * 0.6; // light pollution just above the skyline
-        gl_FragColor = vec4(c, 1.0);
-      }`,
-    side: THREE.BackSide,
+      void main() { gl_FragColor = vec4(0.65, 0.72, 1.0, 0.25); }`,
+    transparent: true,
     depthWrite: false,
   });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(2400, 32, 16), material);
-  dome.renderOrder = -1;
-  return dome;
+  const positions = new Float32Array(RAIN_DROPS * 6);
+  const ends = new Float32Array(RAIN_DROPS * 2);
+  for (let i = 0; i < RAIN_DROPS; i++) {
+    const x = Math.random() * RAIN_BOX;
+    const y = Math.random() * RAIN_HEIGHT;
+    const z = Math.random() * RAIN_BOX;
+    positions.set([x, y, z, x, y, z], i * 6);
+    ends.set([0, 1], i * 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('aEnd', new THREE.BufferAttribute(ends, 1));
+  const rain = new THREE.LineSegments(geo, material);
+  rain.frustumCulled = false;
+  scene.add(rain);
+  return material;
 }

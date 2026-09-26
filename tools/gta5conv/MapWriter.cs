@@ -7,6 +7,17 @@
 //                   u16 pad, then the mip chain (largest first)
 //   roads.json      the path-node graph: nodes [[x,y,z]…] and links [[a, b, lanesAtoB, lanesBtoA]…]
 //
+// Options: --cell <m> cell size (200), --max-tex <px> (1024), --props <dir> (see MapExport.cs), and
+//   --road-col <regex> / --road-mat <n,n…> / --road-tex <regex>   derive the road graph from the road surface
+//       (collision files whose name matches, collision material types, render triangles whose diffuse
+//       texture matches; see RoadDerive.cs) instead of the mod's path nodes, for mods that ship none
+//   --all-col         keep every collision file (by default one that contains three or more others is
+//                     taken for a combined copy and skipped); exact duplicate triangles are dropped instead
+//   --crop <m>        leave out cells farther than this from every road node (distant scenery, sea planes)
+//   --drop-water      leave out water surfaces (water shaders, textures named water/sea/ocean)
+//   --render-col <regex>  also collide with the render meshes of entities whose archetype name matches
+//                     (for mods whose buildings ship without collision)
+//
 // Cell .bin: u32 json length, JSON { batches: [{ material, vertices, indices }] }, padding to 4 bytes,
 // then per batch: f32 position×3, f32 normal×3, f32 uv×2 per vertex, then u32 indices.
 //
@@ -37,11 +48,29 @@ static class MapWriter
     {
         float cellSize = 200;
         int maxTex = 1024;
+        bool allCol = false, dropWater = false;
+        float crop = 0;
+        System.Text.RegularExpressions.Regex roadCol = null, roadTex = null;
+        HashSet<int> roadMat = null;
+        System.Text.RegularExpressions.Regex renderColRe = null;
+        var renderCol = new List<Vector3>(); // render triangles that also collide (--render-col)
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--cell") cellSize = float.Parse(args[++i]);
             if (args[i] == "--max-tex") maxTex = int.Parse(args[++i]);
+            if (args[i] == "--all-col") allCol = true;
+            if (args[i] == "--drop-water") dropWater = true;
+            if (args[i] == "--crop") crop = float.Parse(args[++i]);
+            if (args[i] == "--road-col") roadCol = new(args[++i], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (args[i] == "--road-tex") roadTex = new(args[++i], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (args[i] == "--road-mat") roadMat = args[++i].Split(',').Select(int.Parse).ToHashSet();
+            if (args[i] == "--render-col") renderColRe = new(args[++i], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
+        bool deriveRoads = roadCol != null || roadTex != null || roadMat != null;
+        var roadTris = new List<Vector3>(); // road surface triangles for RoadDerive, game frame
+        var waterRe = new System.Text.RegularExpressions.Regex(@"(^|_)(water|sea|ocean)(_|\d|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        long waterTris = 0; double waterArea = 0; float waterMinY = float.MaxValue, waterMaxY = float.MinValue;
+        var waterTex = new HashSet<string>();
         Directory.CreateDirectory(Path.Combine(outDir, "cells"));
         Directory.CreateDirectory(Path.Combine(outDir, "col"));
         Directory.CreateDirectory(Path.Combine(outDir, "tex"));
@@ -52,7 +81,7 @@ static class MapWriter
         {
             var ytd = new YtdFile();
             ytd.Load(File.ReadAllBytes(path));
-            foreach (var t in ytd.TextureDict?.Textures?.data_items ?? []) if (t?.Name != null) textures.TryAdd(t.Name, t);
+            foreach (var t in ytd.TextureDict?.Textures?.data_items ?? []) if (t?.Name != null) { textures.TryAdd(t.Name, t); textures.TryAdd(TexKey(t.Name), t); }
         }
 
         // Drawables by name hash: loose .ydr files, fragments (.yft), and every entry of .ydd dictionaries
@@ -91,7 +120,7 @@ static class MapWriter
             }
             catch (Exception ex) { Console.WriteLine($"skipping unreadable {path}: {ex.GetType().Name}"); }
             foreach (var t in found?.ShaderGroup?.TextureDictionary?.Textures?.data_items ?? [])
-                if (t?.Name != null) textures.TryAdd(t.Name, t);
+                if (t?.Name != null) { textures.TryAdd(t.Name, t); textures.TryAdd(TexKey(t.Name), t); }
             return drawables[hash] = found;
         }
 
@@ -138,6 +167,7 @@ static class MapWriter
         foreach (var (e, d) in placed)
         {
             var world = Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position);
+            bool solid = renderColRe != null && renderColRe.IsMatch(JenkIndex.GetString(e.CEntityDef.archetypeName));
             foreach (var model in ModelsFor(d, props.Contains(e.CEntityDef.archetypeName)))
                 foreach (var g in model.Geometries ?? [])
                 {
@@ -145,6 +175,9 @@ static class MapWriter
                     var idx = g.IndexBuffer?.Indices;
                     if (vd?.Info == null || idx == null) continue;
                     var mat = MaterialFor(g.Shader, materials);
+                    bool water = mat.Shader.StartsWith("water") || (mat.Diffuse != null && waterRe.IsMatch(mat.Diffuse));
+                    if (water && dropWater) continue;
+                    bool roadSurface = roadTex != null && mat.Diffuse != null && roadTex.IsMatch(mat.Diffuse);
                     var info = vd.Info;
                     bool has(int c) => ((info.Flags >> c) & 1) != 0;
                     var pos = new Vector3[vd.VertexCount];
@@ -177,6 +210,15 @@ static class MapWriter
                     {
                         var c = (pos[idx[i]] + pos[idx[i + 1]] + pos[idx[i + 2]]) / 3;
                         var key = ((int)MathF.Floor(c.X / cellSize), (int)MathF.Floor(c.Z / cellSize));
+                        if (roadSurface) roadTris.AddRange([pos[idx[i]], pos[idx[i + 1]], pos[idx[i + 2]]]);
+                        if (solid && !mat.Blend) renderCol.AddRange([pos[idx[i]], pos[idx[i + 1]], pos[idx[i + 2]]]);
+                        if (water)
+                        {
+                            waterTris++;
+                            waterArea += Vector3.Cross(pos[idx[i + 1]] - pos[idx[i]], pos[idx[i + 2]] - pos[idx[i]]).Length() / 2;
+                            waterMinY = Math.Min(waterMinY, c.Y); waterMaxY = Math.Max(waterMaxY, c.Y);
+                            waterTex.Add(mat.Diffuse ?? mat.Shader);
+                        }
                         if (!cells.TryGetValue(key, out var cell)) cells[key] = cell = [];
                         if (!cell.TryGetValue(mat.Index, out var b)) cell[mat.Index] = b = new Batch();
                         if (!remap.TryGetValue(key, out var map)) remap[key] = map = [];
@@ -200,9 +242,18 @@ static class MapWriter
 
         // Collision from the mod's static bounds (already in world space)
         var colCells = new Dictionary<(int, int), (List<float> v, List<uint> i)>();
-        long colTris = 0;
+        long colTris = 0, colDuplicates = 0;
+        var colSeen = allCol ? new HashSet<(long, long, long)>() : null;
+        long quant(Vector3 v) => ((long)MathF.Round(v.X * 50) * 73856093) ^ ((long)MathF.Round(v.Y * 50) * 19349663) ^ ((long)MathF.Round(v.Z * 50) * 83492791);
         void addTri(Vector3 a, Vector3 bb, Vector3 c)
         {
+            if (colSeen != null)
+            {
+                // Same triangle from two files (a combined copy of split ones): add it once
+                long qa = quant(a), qb = quant(bb), qc = quant(c);
+                var k = qa < qb ? (qb < qc ? (qa, qb, qc) : qa < qc ? (qa, qc, qb) : (qc, qa, qb)) : (qa < qc ? (qb, qa, qc) : qb < qc ? (qb, qc, qa) : (qc, qb, qa));
+                if (!colSeen.Add(k)) { colDuplicates++; return; }
+            }
             var m = (a + bb + c) / 3;
             var key = ((int)MathF.Floor(m.X / cellSize), (int)MathF.Floor(m.Z / cellSize));
             if (!colCells.TryGetValue(key, out var cc)) colCells[key] = cc = ([], []);
@@ -212,12 +263,13 @@ static class MapWriter
             colTris++;
         }
         // `world` places the bound: identity for the map's own (world-space) bounds, the entity's matrix for props
-        void addBounds(Bounds b, Matrix world)
+        // `file` is the collision file's name, for picking road surfaces (--road-col); null for props
+        void addBounds(Bounds b, Matrix world, string file = null)
         {
             Vector3 at(Vector3 local) => toGame(Vector3.TransformCoordinate(local, world));
             if (b is BoundComposite comp)
             {
-                foreach (var ch in comp.Children?.data_items ?? []) if (ch != null) addBounds(ch, ch.Transform * world);
+                foreach (var ch in comp.Children?.data_items ?? []) if (ch != null) addBounds(ch, ch.Transform * world, file);
                 return;
             }
             if (b is BoundBox or BoundCapsule or BoundCylinder)
@@ -235,23 +287,66 @@ static class MapWriter
                 return;
             }
             if (b is not BoundGeometry bg || bg.Polygons == null) return;
-            foreach (var p in bg.Polygons)
-                if (p is BoundPolygonTriangle t)
-                    addTri(at(bg.GetVertexPos(t.vertIndex1)), at(bg.GetVertexPos(t.vertIndex2)), at(bg.GetVertexPos(t.vertIndex3)));
+            bool roadFile = file != null && (roadCol != null || roadMat != null) && (roadCol == null || roadCol.IsMatch(file));
+            for (int pi = 0; pi < bg.Polygons.Length; pi++)
+                if (bg.Polygons[pi] is BoundPolygonTriangle t)
+                {
+                    Vector3 a = at(bg.GetVertexPos(t.vertIndex1)), b2 = at(bg.GetVertexPos(t.vertIndex2)), c = at(bg.GetVertexPos(t.vertIndex3));
+                    addTri(a, b2, c);
+                    if (roadFile && (roadMat == null || roadMat.Contains((int)bg.GetMaterial(pi).Type))) roadTris.AddRange([a, b2, c]);
+                }
         }
         // Some mods ship one combined collision file as well as split ones; skip any bound that
         // contains several others, so the same surfaces aren't added twice
-        var ybns = mod.Ybns.Values.Select(p => { var y = new YbnFile(); y.Load(File.ReadAllBytes(p)); return y; })
-            .Where(y => y.Bounds != null).ToList();
+        var ybns = mod.Ybns.Select(kv => { var y = new YbnFile(); y.Load(File.ReadAllBytes(kv.Value)); return (name: kv.Key, y); })
+            .Where(x => x.y.Bounds != null).ToList();
         bool contains(Bounds a, Bounds b) => a != b
             && a.BoxMin.X <= b.BoxMin.X + 1 && a.BoxMin.Y <= b.BoxMin.Y + 1 && a.BoxMin.Z <= b.BoxMin.Z + 1
             && a.BoxMax.X >= b.BoxMax.X - 1 && a.BoxMax.Y >= b.BoxMax.Y - 1 && a.BoxMax.Z >= b.BoxMax.Z - 1;
-        foreach (var y in ybns)
-            if (ybns.Count(o => contains(y.Bounds, o.Bounds)) < 3) addBounds(y.Bounds, Matrix.Identity);
-        // Props (trees, lamp posts, traffic lights) bring their own collision
+        var skippedCol = new List<string>();
+        foreach (var (name, y) in ybns)
+            if (allCol || ybns.Count(o => contains(y.Bounds, o.y.Bounds)) < 3) addBounds(y.Bounds, Matrix.Identity, name);
+            else skippedCol.Add(name);
+        if (skippedCol.Count > 0) Console.WriteLine($"collision files taken for combined copies and skipped (--all-col keeps them): {string.Join(", ", skippedCol)}");
+        if (colDuplicates > 0) Console.WriteLine($"{colDuplicates} duplicate collision triangles dropped");
+        for (int i = 0; i + 2 < renderCol.Count; i += 3) addTri(renderCol[i], renderCol[i + 1], renderCol[i + 2]);
+        if (renderCol.Count > 0) Console.WriteLine($"{renderCol.Count / 3} render triangles added as collision");
+        // Bounds: add world-space bounds from .ybn files, plus embedded bounds from all placed drawables/props
         foreach (var (e, _) in placed)
-            if (props.Contains(e.CEntityDef.archetypeName) && propBounds.TryGetValue(e.CEntityDef.archetypeName, out var pb) && pb != null)
-                addBounds(pb, Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position));
+            if (propBounds.TryGetValue(e.CEntityDef.archetypeName, out var pb) && pb != null)
+                addBounds(pb, Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position),
+                    JenkIndex.GetString(e.CEntityDef.archetypeName));
+
+        // Roads: the mod's path nodes, or derived from the road surface
+        var roads = deriveRoads ? DerivedRoads(roadTris) : Roads(mod, toGame);
+        File.WriteAllText(Path.Combine(outDir, "roads.json"), roads.json.ToJsonString());
+
+        // Crop: cells too far from any road are scenery the player can't reach
+        var cropped = new HashSet<(int, int)>();
+        if (crop > 0 && roads.nodes.Count > 0)
+        {
+            var near = new HashSet<(int, int)>();
+            int reach = (int)MathF.Ceiling(crop / cellSize);
+            foreach (var n in roads.nodes)
+            {
+                int cx = (int)MathF.Floor(n.X / cellSize), cz = (int)MathF.Floor(n.Z / cellSize);
+                for (int dx = -reach; dx <= reach; dx++)
+                    for (int dz = -reach; dz <= reach; dz++)
+                    {
+                        // Distance from the node to that cell's rectangle
+                        float x0 = (cx + dx) * cellSize, z0 = (cz + dz) * cellSize;
+                        float ddx = Math.Max(Math.Max(x0 - n.X, 0), n.X - (x0 + cellSize)), ddz = Math.Max(Math.Max(z0 - n.Z, 0), n.Z - (z0 + cellSize));
+                        if (ddx * ddx + ddz * ddz <= crop * crop) near.Add((cx + dx, cz + dz));
+                    }
+            }
+            foreach (var k in cells.Keys.Union(colCells.Keys)) if (!near.Contains(k)) cropped.Add(k);
+            foreach (var k in cropped)
+            {
+                if (cells.Remove(k, out var bs)) triangles -= bs.Values.Sum(b => b.Idx.Count / 3);
+                if (colCells.Remove(k, out var cc)) colTris -= cc.i.Count / 3;
+            }
+            Console.WriteLine($"cropped {cropped.Count} cells farther than {crop} m from the roads");
+        }
 
         // Write cells
         var cellList = new JsonArray();
@@ -327,10 +422,6 @@ static class MapWriter
             else missingTex.Add(name + $"({t.Format})");
         }
 
-        // Roads
-        var roads = Roads(mod, toGame);
-        File.WriteAllText(Path.Combine(outDir, "roads.json"), roads.json.ToJsonString());
-
         var matJson = new JsonArray(matList.Select(m => (JsonNode)new JsonObject
         {
             ["shader"] = m.Shader,
@@ -356,6 +447,12 @@ static class MapWriter
             {
                 ["entities"] = placed.Count, ["missingEntities"] = missing, ["triangles"] = triangles,
                 ["collisionTriangles"] = colTris, ["textures"] = written, ["roadNodes"] = roads.nodes.Count,
+                ["roadsDerived"] = deriveRoads, ["croppedCells"] = cropped.Count,
+                ["water"] = waterTris == 0 ? null : new JsonObject
+                {
+                    ["triangles"] = waterTris, ["area"] = Math.Round(waterArea), ["minY"] = waterMinY, ["maxY"] = waterMaxY,
+                    ["textures"] = new JsonArray(waterTex.Order().Select(t => (JsonNode)t).ToArray()), ["dropped"] = dropWater,
+                },
             },
         };
         var propCost = placed.Where(p => props.Contains(p.e.CEntityDef.archetypeName))
@@ -369,10 +466,10 @@ static class MapWriter
         Console.WriteLine($"{outDir}: {placed.Count} entities ({missing} missing: {string.Join(",", missingNames.Keys.Take(8))}), {triangles} tris, {cellList.Count} cells, {colTris} collision tris, {written} textures ({missingTex.Count} missing: {string.Join(",", missingTex.Take(10))}), {roads.nodes.Count} road nodes");
     }
 
-    const int PropTriangles = 2500;
+    const int PropTriangles = 15000;
 
     /// <summary>The map's own models at full detail. Props (trees, lights) sit in their thousands, so take the most
-    /// detailed LOD under a triangle budget; GTA's own LOD chain drops leaves to cards well before a tree looks worse.</summary>
+    /// detailed LOD under a triangle budget; increased to 15000 to preserve high-quality tree geometry.</summary>
     static DrawableModel[] ModelsFor(DrawableBase d, bool prop)
     {
         var m = d.DrawableModels;
@@ -387,6 +484,13 @@ static class MapWriter
             if (lod.Sum(x => (x.Geometries ?? []).Sum(g => (long)g.IndicesCount / 3)) <= PropTriangles) return lod;
         }
         return last;
+    }
+
+    /// <summary>Some tools name textures like files ("pack:/5a4b2b38.dds") while shaders refer to them as "5a4b2b38".</summary>
+    static string TexKey(string name)
+    {
+        var k = name[(name.LastIndexOfAny(['/', '\\']) + 1)..];
+        return k.EndsWith(".dds", StringComparison.OrdinalIgnoreCase) ? k[..^4] : k;
     }
 
     static string Safe(string name) => string.Concat(name.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' ? c : '_'));
@@ -450,6 +554,7 @@ static class MapWriter
             byte[] px;
             try { px = DDSIO.GetPixels(t, skip); } catch { px = null; }
             if (px == null) return false;
+            for (int i = 0; i < px.Length; i += 4) (px[i], px[i + 2]) = (px[i + 2], px[i]); // CodeWalker decodes to BGRA
             ms.Write(px);
             mips = 1;
         }
@@ -460,6 +565,20 @@ static class MapWriter
         bw.Write((ushort)w); bw.Write((ushort)h); bw.Write((ushort)mips); bw.Write((ushort)0);
         bw.Write(ms.ToArray());
         return true;
+    }
+
+    /// <summary>A road graph derived from road surface triangles (game frame), in the roads.json shape.</summary>
+    static (List<Vector3> nodes, JsonObject json) DerivedRoads(List<Vector3> tris)
+    {
+        var (nodes, links) = RoadDerive.Build(tris);
+        var json = new JsonObject
+        {
+            ["nodes"] = new JsonArray(nodes.Select(p => (JsonNode)new JsonArray(Math.Round(p.X, 2), Math.Round(p.Y, 2), Math.Round(p.Z, 2))).ToArray()),
+            ["flags"] = new JsonArray(nodes.Select(_ => (JsonNode)0).ToArray()),
+            ["links"] = new JsonArray(links.Select(l => (JsonNode)new JsonArray(l.a, l.b, l.lanesAB, l.lanesBA)).ToArray()),
+            ["derived"] = true,
+        };
+        return (nodes, json);
     }
 
     /// <summary>Vehicle path nodes → a plain graph (positions in the game frame).</summary>

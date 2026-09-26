@@ -6,8 +6,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 
 const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
-const COLLISION_RADIUS = 340; // m of collision around the player and rivals (traffic lives within ~300 m)
-const LOADS_PER_FRAME = 2;
+const COLLISION_RADIUS = 600; // m of collision around the player and rivals (traffic lives within ~300 m)
+const LOADS_PER_FRAME = 3;
 // Small things vanish into the fog early: a mesh is drawn out to this many times its size
 const DRAW_DISTANCE_PER_METER = 18;
 const MIN_DRAW_DISTANCE = 120;
@@ -34,7 +34,7 @@ interface MaterialInfo {
   blend: boolean;
   mask: boolean;
 }
-interface Manifest {
+export interface Manifest {
   origin: number[];
   cellSize: number;
   spawn: number[];
@@ -45,31 +45,103 @@ interface Manifest {
 export class GameMap {
   readonly root = new THREE.Group();
   readonly roads: RoadGraph;
+  readonly roadData: RoadData; // in world space (offset applied), for merging islands' graphs
   readonly spawn: THREE.Vector3;
+  /** World-space footprint of the render cells. */
+  readonly min = new THREE.Vector2(Infinity, Infinity);
+  readonly max = new THREE.Vector2(-Infinity, -Infinity);
+  private readonly local = new THREE.Vector3();
   private readonly materials: (THREE.Material | null)[];
   private readonly textures = new Map<string, Promise<THREE.Texture | null>>();
   private readonly meshes = new Map<number, THREE.Group | 'loading'>();
   private readonly colliders = new Map<number, RAPIER.Collider | 'loading'>();
 
   private constructor(
+    readonly id: string,
     private readonly base: string,
-    private readonly manifest: Manifest,
+    readonly manifest: Manifest,
     roads: RoadData,
     private readonly world: RAPIER.World,
+    /** Where the map's own origin sits in the world (islands are laid out side by side). */
+    readonly offset: THREE.Vector3,
   ) {
-    this.roads = new RoadGraph(roads);
-    this.spawn = new THREE.Vector3(...(manifest.spawn as [number, number, number]));
+    const [ox, oy, oz] = [offset.x, offset.y, offset.z];
+    this.roadData = { ...roads, nodes: roads.nodes.map(([x, y, z]) => [x + ox, y + oy, z + oz]) };
+    this.roads = new RoadGraph(this.roadData);
+    this.spawn = new THREE.Vector3(...(manifest.spawn as [number, number, number])).add(offset);
     this.materials = manifest.materials.map(() => null);
-    this.root.name = 'map';
+    this.root.name = `map:${id}`;
+    this.root.position.copy(offset);
+    const s = manifest.cellSize;
+    for (const c of manifest.cells) {
+      if (!c.render) continue;
+      this.min.set(Math.min(this.min.x, c.x + ox), Math.min(this.min.y, c.z + oz));
+      this.max.set(Math.max(this.max.x, c.x + s + ox), Math.max(this.max.y, c.z + s + oz));
+    }
   }
 
-  static async load(id: string, world: RAPIER.World): Promise<GameMap> {
+  static async load(id: string, world: RAPIER.World, offset = new THREE.Vector3()): Promise<GameMap> {
+    const { manifest, roads } = await GameMap.fetchData(id);
+    return new GameMap(id, `/mods/maps/${id}`, manifest, roads, world, offset);
+  }
+
+  static async fetchData(id: string): Promise<{ manifest: Manifest; roads: RoadData }> {
     const base = `/mods/maps/${id}`;
     const [manifest, roads] = await Promise.all([
       fetch(`${base}/manifest.json`).then((r) => r.json() as Promise<Manifest>),
       fetch(`${base}/roads.json`).then((r) => r.json() as Promise<RoadData>),
     ]);
-    return new GameMap(base, manifest, roads, world);
+    return { manifest, roads };
+  }
+
+  /** Build from data already fetched with fetchData(). */
+  static from(id: string, data: { manifest: Manifest; roads: RoadData }, world: RAPIER.World, offset: THREE.Vector3): GameMap {
+    return new GameMap(id, `/mods/maps/${id}`, data.manifest, data.roads, world, offset);
+  }
+
+  /** Local footprint of a map's render cells, before it's placed: [minX, minZ, maxX, maxZ]. */
+  static footprint(manifest: Manifest): [number, number, number, number] {
+    const s = manifest.cellSize;
+    const out: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const c of manifest.cells) {
+      if (!c.render) continue;
+      out[0] = Math.min(out[0], c.x);
+      out[1] = Math.min(out[1], c.z);
+      out[2] = Math.max(out[2], c.x + s);
+      out[3] = Math.max(out[3], c.z + s);
+    }
+    return out;
+  }
+
+  /** Horizontal distance from a world point to this map's footprint (0 inside). */
+  distanceTo(p: THREE.Vector3): number {
+    const dx = Math.max(this.min.x - p.x, 0, p.x - this.max.x);
+    const dz = Math.max(this.min.y - p.z, 0, p.z - this.max.y);
+    return Math.hypot(dx, dz);
+  }
+
+  /** Anything streamed in right now (render or collision)? */
+  get active(): boolean {
+    return this.meshes.size > 0 || this.colliders.size > 0;
+  }
+
+  /** Emissive overlays (lit windows, signs) only glow at night: 0 by day, 1 at night. */
+  setNight(amount: number): void {
+    this.night = amount;
+    for (const m of this.materials) if (m) this.applyNight(m);
+  }
+
+  private night = 1;
+
+  private applyNight(m: THREE.Material): void {
+    const base = m.userData.glow as number | undefined;
+    if (base === undefined) return;
+    if (m instanceof THREE.MeshBasicMaterial) {
+      m.color.setScalar(base * this.night);
+      m.visible = this.night > 0.01;
+    } else if (m instanceof THREE.MeshStandardMaterial) {
+      m.emissiveIntensity = base * this.night;
+    }
   }
 
   /** Load everything needed around a point right now (before the first frame). */
@@ -114,7 +186,8 @@ export class GameMap {
   }
 
   /** Hide meshes too small to matter at their distance (call each frame before rendering). */
-  cull(camera: THREE.Vector3): void {
+  cull(world: THREE.Vector3): void {
+    const camera = this.local.subVectors(world, this.offset);
     for (const group of this.meshes.values()) {
       if (group === 'loading') continue;
       for (const o of group.children) {
@@ -130,8 +203,9 @@ export class GameMap {
     return [...this.meshes.values()].filter((m) => m !== 'loading').length;
   }
 
-  private distance(c: CellInfo, p: THREE.Vector3): number {
+  private distance(c: CellInfo, world: THREE.Vector3): number {
     const s = this.manifest.cellSize;
+    const p = this.local.subVectors(world, this.offset);
     const dx = Math.max(c.x - p.x, 0, p.x - (c.x + s));
     const dz = Math.max(c.z - p.z, 0, p.z - (c.z + s));
     return Math.hypot(dx, dz);
@@ -182,7 +256,9 @@ export class GameMap {
     const indices = view.getUint32(4, true);
     const pos = new Float32Array(buf, 8, vertices * 3);
     const idx = new Uint32Array(buf, 8 + vertices * 12, indices);
-    const collider = this.world.createCollider(RAPIER.ColliderDesc.trimesh(pos, idx).setFriction(0.9).setCollisionGroups(STATIC_GROUPS));
+    const desc = RAPIER.ColliderDesc.trimesh(pos, idx).setFriction(0.9).setCollisionGroups(STATIC_GROUPS)
+      .setTranslation(this.offset.x, this.offset.y, this.offset.z);
+    const collider = this.world.createCollider(desc);
     this.colliders.set(c.id, collider);
   }
 
@@ -200,23 +276,46 @@ export class GameMap {
     if (m.shader.startsWith('emissive') && map) {
       const glow = new THREE.MeshBasicMaterial({
         map,
-        color: new THREE.Color(1, 1, 1).multiplyScalar(m.shader.includes('night') ? 1.6 : 1.1),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         polygonOffset: true,
         polygonOffsetFactor: -2,
       });
+      glow.userData.glow = m.shader.includes('night') ? 2.5 : 1.8;
+      this.applyNight(glow);
       this.materials[i] = glow;
       return glow;
     }
     const spec = m.shader.includes('spec');
+    const isGlass = m.shader.includes('glass') || (m.diffuse && /glass|window/i.test(m.diffuse));
+    const isRoad = m.shader.includes('terrain') || (m.diffuse && /road|asphalt|tarmac|pavement/i.test(m.diffuse));
+    const isMetal = m.shader.includes('metal') || (m.diffuse && /metal|chrome|steel/i.test(m.diffuse));
+
+    let roughness = 0.75;
+    let metalness = 0.0;
+
+    if (isGlass) {
+      roughness = 0.1;
+      metalness = 0.9;
+    } else if (isRoad) {
+      roughness = 0.45; // Wet/smooth asphalt look
+      metalness = 0.05;
+    } else if (isMetal) {
+      roughness = 0.25;
+      metalness = 0.85;
+    } else if (spec) {
+      roughness = 0.4;
+      metalness = 0.1;
+    }
+
     const mat = new THREE.MeshStandardMaterial({
       map, normalMap,
       color: map ? 0xffffff : 0x808080,
-      roughness: spec ? 0.55 : 0.85,
-      metalness: 0,
-      transparent: m.blend,
+      roughness,
+      metalness,
+      transparent: !!(m.blend || isGlass),
+      opacity: isGlass ? 0.85 : 1.0,
       depthWrite: !m.blend,
       alphaTest: m.mask ? 0.5 : 0,
       side: m.mask ? THREE.DoubleSide : THREE.FrontSide,
@@ -226,7 +325,8 @@ export class GameMap {
       mat.emissiveMap = map;
       mat.emissive.set(0xffffff);
       // "emissivenight" is signage and lit windows; plain "emissive" often covers whole facades
-      mat.emissiveIntensity = m.shader.includes('night') ? 1.4 : 0.12;
+      mat.userData.glow = m.shader.includes('night') ? 2.2 : 0.25;
+      this.applyNight(mat);
     }
     this.materials[i] = mat;
     return mat;
@@ -287,7 +387,7 @@ function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture {
 
 // --- Roads ---
 
-interface RoadData {
+export interface RoadData {
   nodes: [number, number, number][];
   flags: number[];
   links: [number, number, number, number][]; // a, b, lanes a→b, lanes b→a
@@ -469,7 +569,12 @@ export class RoadGraph {
   /** A pose on the nearest road, in a right-hand lane, facing the way closest to `heading`. */
   roadPose(x: number, z: number, heading: number): { position: THREE.Vector3; yaw: number } {
     const near = this.nearestLink(x, z);
-    if (!near) return { position: new THREE.Vector3(x, 2, z), yaw: -heading };
+    if (!near) {
+      // Off the network (in the sea): the closest road anywhere
+      const n = this.nodes[this.nearestNode(x, z)];
+      if (!n || (n.x === x && n.z === z)) return { position: new THREE.Vector3(x, 2, z), yaw: -heading };
+      return this.roadPose(n.x, n.z, heading);
+    }
     const a = this.nodes[near.link.a];
     const b = this.nodes[near.link.b];
     let dx = b.x - a.x;

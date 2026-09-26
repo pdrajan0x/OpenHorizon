@@ -47,6 +47,7 @@ function tuningFor(spec: Spec, paint: number, engine: string, template: () => Te
   const top = clamp(((h.maxFlatVel ?? 300) / 3.6) * 0.95, 60, 95); // m/s
   const accel = clamp((h.driveForce ?? 0.33) * 9.81 * 2.8, 7.5, 12.5); // m/s² from standstill
   const grip = clamp((h.tractionMax ?? 2.5) * 0.95, 2.2, 2.7);
+  const massRatio = mass / 1500;
   return {
     ...BASE,
     name: spec.name,
@@ -60,12 +61,21 @@ function tuningFor(spec: Spec, paint: number, engine: string, template: () => Te
     driveRear: bias < 0.9,
     engineForce: mass * accel,
     topSpeed: top,
-    brakeForce: mass * clamp((h.brakeForce ?? 1) * 12, 10, 15),
+    reverseForce: mass * 7.5,
+    reverseTopSpeed: 16,
+    brakeForce: mass * clamp((h.brakeForce ?? 1) * 20, 18, 26),
+    handbrakeForce: mass * 11,
     gripFront: grip,
     gripRear: grip + 0.05,
-    driftGripRear: grip * 0.55,
-    maxSteer: clamp(((h.steeringLock ?? 40) * Math.PI) / 180 * 1.3, 0.45, 0.62),
-    highSpeedSteer: 0.1,
+    driftGripRear: grip * 0.52,
+    handbrakeGripRear: 0.65,
+    maxSteer: clamp(((h.steeringLock ?? 40) * Math.PI) / 180 * 1.3, 0.48, 0.64),
+    highSpeedSteer: 0.20,
+    steerRate: 3.8,
+    driftYawStiffness: 48000 * massRatio,
+    driftYawDamping: 22000 * massRatio,
+    driftMaxTorque: 36000 * massRatio,
+    driftSustain: 7.0,
     drag: 0.5,
     downforce: 1.0,
     boostForce: mass * accel * 0.9,
