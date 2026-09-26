@@ -41,7 +41,13 @@ const PAINTS = [0x1c1e24, 0x8a8f99, 0xc9ccd2, 0x2b3a55, 0x5a1f24, 0x1f4a3a, 0x3a
 const TAXI_PAINT = 0xf2b705;
 const INTERIOR = /interior|dash|cloth|badges/; // shaders traffic never shows well enough to pay for
 const SIMPLIFY_RATIO = 0.25;
-const TRAFFIC_GLASS = new THREE.MeshStandardMaterial({ color: 0x07090d, roughness: 0.08, metalness: 0.7 });
+// Shared by every traffic model: paint takes each car's color per instance, the rest vertex colors
+const FLEET_MATERIALS = {
+  paint: new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 }),
+  glass: new THREE.MeshStandardMaterial({ color: 0x07090d, roughness: 0.08, metalness: 0.7 }),
+  lights: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  body: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 }),
+};
 const SIMPLIFY_ERROR = 0.02; // relative to the mesh size
 
 /** A traffic car as other systems see it: near-miss checks, rival avoidance. */
@@ -64,28 +70,41 @@ class Fleet {
   constructor(scene: THREE.Scene, template: Template, readonly taxi: boolean, capacity: number) {
     const visual = modCarVisual(template, { paint: 0xffffff });
     visual.root.updateMatrixWorld(true);
-    // Bake every part into one geometry per material, so a car model costs one draw call per material
-    const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    // Collapse the model into four batches (paint, glass, lights, everything else), so a traffic car
+    // costs four draw calls however many materials the mod has. Textures give way to each material's
+    // average color, baked into vertex colors: at traffic distance the detail doesn't read anyway.
+    const groups: Record<'paint' | 'glass' | 'lights' | 'body', THREE.BufferGeometry[]> = { paint: [], glass: [], lights: [], body: [] };
+    const color = new THREE.Color();
     visual.root.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
-      const material = mesh.material as THREE.Material;
-      if (INTERIOR.test((material.userData as { shader?: string }).shader ?? '')) return;
-      const list = byMaterial.get(material) ?? [];
-      list.push(plainGeometry(mesh.geometry).applyMatrix4(mesh.matrixWorld));
-      byMaterial.set(material, list);
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      const info = material.userData as { shader?: string; average?: number[]; emissive?: boolean };
+      if (INTERIOR.test(info.shader ?? '')) return;
+      const kind = (material as THREE.MeshPhysicalMaterial).clearcoat === 1 ? 'paint'
+        : material.transparent ? 'glass'
+        : info.emissive ? 'lights' : 'body';
+      color.copy(material.color);
+      if (material.map && info.average) color.multiply(new THREE.Color(...(info.average as [number, number, number])).convertSRGBToLinear());
+      if (kind === 'lights') color.multiplyScalar(2.2);
+      const g = plainGeometry(mesh.geometry).applyMatrix4(mesh.matrixWorld);
+      const n = g.getAttribute('position').count;
+      const colors = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) colors.set([color.r, color.g, color.b], i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      g.deleteAttribute('uv');
+      groups[kind].push(g);
     });
-    for (const [material, geos] of byMaterial) {
+    for (const [kind, geos] of Object.entries(groups)) {
+      if (geos.length === 0) continue;
       const geometry = mergeGeometries(geos, false);
       if (!geometry) continue;
       simplify(geometry);
-      // Transparent glass is by far the most expensive part of a car to draw; traffic gets tinted opaque windows
-      const shaded = material.transparent ? TRAFFIC_GLASS : material;
-      const inst = new THREE.InstancedMesh(geometry, shaded, capacity);
+      const inst = new THREE.InstancedMesh(geometry, FLEET_MATERIALS[kind as keyof typeof groups], capacity);
       inst.count = 0;
       inst.visible = false;
       inst.frustumCulled = false;
-      const paint = (material as THREE.MeshPhysicalMaterial).clearcoat === 1;
+      const paint = kind === 'paint';
       if (paint) inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
       scene.add(inst);
       this.parts.push({ mesh: inst, local: new THREE.Matrix4(), paint });

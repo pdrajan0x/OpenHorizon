@@ -82,10 +82,10 @@ const COUNTDOWN = 3;
 const RESULT_SECONDS = 4.5;
 const LANE = 1.7; // m right of the road's centerline for the player's grid slot
 const GRID = [
-  { lane: -LANE, back: 8 },
-  { lane: LANE, back: 16 },
-  { lane: -LANE, back: 16 },
-  { lane: LANE, back: 24 },
+  { lane: -LANE, back: 9 },
+  { lane: LANE, back: 19 },
+  { lane: -LANE, back: 20 },
+  { lane: LANE, back: 30 },
 ];
 const RAGE_RIVALS = 4;
 const STORAGE_KEY = 'neonrun.events';

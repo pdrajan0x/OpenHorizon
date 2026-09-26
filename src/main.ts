@@ -298,6 +298,7 @@ async function main(): Promise<void> {
       cam.update(dt, player, clearance);
     }
     atmosphere.update(simTime, cam.camera.position);
+    map.cull(cam.camera.position);
 
     fps.frames++;
     if (now - fps.since > 500) {

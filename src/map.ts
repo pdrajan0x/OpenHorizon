@@ -8,6 +8,9 @@ import * as THREE from 'three';
 const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
 const COLLISION_RADIUS = 340; // m of collision around the player and rivals (traffic lives within ~300 m)
 const LOADS_PER_FRAME = 2;
+// Small things vanish into the fog early: a mesh is drawn out to this many times its size
+const DRAW_DISTANCE_PER_METER = 18;
+const MIN_DRAW_DISTANCE = 120;
 /** Collision groups: the city is in STATIC_GROUP; lane-following traffic skips it (see traffic.ts). */
 export const STATIC_GROUP = 0x0001;
 export const CAR_GROUP = 0x0002;
@@ -106,6 +109,19 @@ export class GameMap {
           this.world.removeCollider(col, false);
           this.colliders.delete(c.id);
         }
+      }
+    }
+  }
+
+  /** Hide meshes too small to matter at their distance (call each frame before rendering). */
+  cull(camera: THREE.Vector3): void {
+    for (const group of this.meshes.values()) {
+      if (group === 'loading') continue;
+      for (const o of group.children) {
+        const mesh = o as THREE.Mesh;
+        const sphere = mesh.geometry.boundingSphere!;
+        const reach = Math.max(MIN_DRAW_DISTANCE, sphere.radius * DRAW_DISTANCE_PER_METER) + sphere.radius;
+        mesh.visible = sphere.center.distanceToSquared(camera) < reach * reach;
       }
     }
   }
