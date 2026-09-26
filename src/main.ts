@@ -87,6 +87,7 @@ async function main(): Promise<void> {
   const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, map.roads);
   const audio = new CarAudio();
   const events = new Events(scene, hud, audio, map.roads, eventDefs);
+  audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   hud.showCar(player);
 
   if (params.has('debug')) {
@@ -146,6 +147,7 @@ async function main(): Promise<void> {
     carIndex = index;
     skids.breakAll();
     hud.showCar(player);
+    audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   };
 
   // Crash: slow-motion orbit of the wreck, then back on the road still rolling

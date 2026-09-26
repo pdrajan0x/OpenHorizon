@@ -10,6 +10,7 @@ export interface CarTuning {
   paint: number;
   underglow?: number;
   makeVisual: (t: CarTuning) => CarVisual; // the car's model, from a GTA V mod
+  engineSound?: string; // engine sound set in public/mods/audio
 
   mass: number;
   centerOfMassHeight: number; // above the ground; lower = harder to roll over

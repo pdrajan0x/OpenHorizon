@@ -1,9 +1,11 @@
-// Car audio. The engine is a GTA V mod's granular engine (engineAudio.ts); a synthesized engine only
-// fills in until it has loaded. Tire squeal and crash thumps are still synthesized. Browsers only
+// Car audio. The engine is a GTA V mod's granular engine (engineAudio.ts) and the tire squeal a mod's
+// skid recording; synthesized stand-ins only fill in until they load. Crash thumps are still
+// synthesized (no crash sound mod yet). Browsers only
 // allow audio after a user gesture, so the graph is built on the first key or pointer press.
 import { GranularEngine } from './engineAudio';
 
-const ENGINE_SET = 'ferrari';
+const DEFAULT_ENGINE = 'lambo-v12';
+const SKID_SOUND = '/mods/audio/skid/tarmac.ogg'; // from a tire skid sound mod
 
 // Fake gearbox: upper speed (m/s) of each gear, so pitch climbs and drops like shifts
 const GEAR_TOPS = [0, 14, 24, 34, 45, 57, 80];
@@ -20,6 +22,7 @@ export class CarAudio {
   private master?: GainNode;
   private noise?: AudioBuffer;
   private engine: GranularEngine | null = null;
+  private engineSet = DEFAULT_ENGINE;
 
   constructor() {
     const start = () => {
@@ -55,6 +58,24 @@ export class CarAudio {
     this.engineGain!.gain.setTargetAtTime(0.25 + 0.5 * throttle, now, 0.1);
     this.tone!.frequency.setTargetAtTime(600 + 1400 * throttle + (boosting ? 1500 : 0), now, 0.1);
     this.skidGain!.gain.setTargetAtTime(skid * 0.35, now, 0.05);
+  }
+
+  /** Switch to another engine sound set (public/mods/audio/<set>). */
+  setEngine(set: string): void {
+    if (set === this.engineSet) return;
+    this.engineSet = set;
+    if (this.ctx) this.loadEngine();
+  }
+
+  private loadEngine(): void {
+    const set = this.engineSet;
+    GranularEngine.load(this.ctx!, this.master!, set)
+      .then((e) => {
+        if (set !== this.engineSet) return e?.stop();
+        this.engine?.stop();
+        this.engine = e;
+      })
+      .catch(() => {});
   }
 
   /** A crunch: filtered noise with a low thump; `strength` 0..1. */
@@ -109,7 +130,7 @@ export class CarAudio {
     master.gain.value = 0.35;
     master.connect(ctx.destination);
     this.master = master;
-    GranularEngine.load(ctx, master, ENGINE_SET).then((e) => (this.engine = e)).catch(() => {});
+    this.loadEngine();
 
     this.tone = ctx.createBiquadFilter();
     this.tone.type = 'lowpass';
@@ -143,7 +164,21 @@ export class CarAudio {
     band.Q.value = 3;
     this.skidGain = ctx.createGain();
     this.skidGain.gain.value = 0;
-    source.connect(band).connect(this.skidGain).connect(master);
+    this.skidGain.connect(master);
+    source.connect(band).connect(this.skidGain);
     source.start();
+    // Swap the synthesized squeal for the mod's recorded tire skid once it loads
+    fetch(SKID_SOUND)
+      .then((r) => r.arrayBuffer())
+      .then((data) => ctx.decodeAudioData(data))
+      .then((buffer) => {
+        const skid = ctx.createBufferSource();
+        skid.buffer = buffer;
+        skid.loop = true;
+        skid.connect(this.skidGain!);
+        skid.start();
+        source.stop();
+      })
+      .catch(() => {});
   }
 }

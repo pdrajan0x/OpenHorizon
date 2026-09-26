@@ -5,6 +5,7 @@
 // back with short crossfades. Accel layers follow the throttle, decel layers take over off-throttle.
 const LOOKAHEAD = 0.1; // s of grains scheduled ahead of the audio clock
 const FADE = 0.35; // fraction of a grain spent crossfading into the next
+const DEFAULT_GROUP_DB = 6;
 const LAYERS = ['engineAccel', 'exhaustAccel', 'engineDecel', 'exhaustDecel', 'engineIdle', 'exhaustIdle'] as const;
 type Layer = (typeof LAYERS)[number];
 
@@ -16,10 +17,11 @@ interface StreamInfo {
 interface EngineInfo {
   player: boolean;
   layers: Partial<Record<Layer, string>>;
-  layerDb: Partial<Record<Layer, number>>;
+  // Sound-bank settings; replacement mods ship without them, and the exporter then infers clockHz
+  layerDb?: Partial<Record<Layer, number>>;
   clockHz: [number, number][]; // per layer clock group: Hz at revs 0 and 1
-  layerClock: Partial<Record<Layer, number>>;
-  mix: { engineDb: number; exhaustDb: number };
+  layerClock?: Partial<Record<Layer, number>>;
+  mix?: { engineDb: number; exhaustDb: number };
 }
 interface Manifest {
   streams: StreamInfo[];
@@ -58,15 +60,15 @@ export class GranularEngine {
       const data = await fetch(`${base}/${stream.file}`).then((r) => r.arrayBuffer());
       const buffer = await ctx.decodeAudioData(data);
       const gain = ctx.createGain();
-      const group = layer.startsWith('engine') ? engine.mix.engineDb : engine.mix.exhaustDb;
+      const group = (layer.startsWith('engine') ? engine.mix?.engineDb : engine.mix?.exhaustDb) ?? DEFAULT_GROUP_DB;
       gain.gain.value = 0;
       gain.connect(out);
       g.layers.set(layer, {
         buffer, start: stream.grains.start, hz: stream.grains.hz, end: stream.grains.end, gain,
-        clock: engine.clockHz[engine.layerClock[layer] ?? 0] ?? [10, 60],
+        clock: engine.clockHz[engine.layerClock?.[layer] ?? 0] ?? engine.clockHz[0] ?? [10, 60],
         next: 0,
       });
-      g.levels.set(layer, db((engine.layerDb[layer] ?? 0) + group - 12));
+      g.levels.set(layer, db((engine.layerDb?.[layer] ?? 0) + group - 12));
     }));
     return g;
   }

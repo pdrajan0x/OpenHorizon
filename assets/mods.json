@@ -527,5 +527,33 @@
     "hasLoose": false,
     "notes": "3.83/5 (3) votes), 30,963 downloads. L0-L2 LODs, replaces Rumpo or add-on. No engine.",
     "downloaded": true
+  },
+  {
+    "id": "audio-tire-skid",
+    "category": "audio",
+    "title": "Realistic Tire Skid Sound Mod",
+    "author": "(see page)",
+    "pageUrl": "https://www.gta5-mods.com/misc/realistic-tire-skid-sound-mod",
+    "fileUrl": "https://files.gta5-mods.com/uploads/realistic-tire-skid-sound-mod/ac22c0-Realistic%20Tire%20Skids%20SOUND%20MOD.zip",
+    "archiveBytes": 304636,
+    "format": "mixed",
+    "files": [],
+    "hasLoose": false,
+    "notes": "66k downloads. Replaces the tire skid/screech sounds.",
+    "downloaded": false
+  },
+  {
+    "id": "audio-real-sounds",
+    "category": "audio",
+    "title": "Real Sounds Mod (ALL IN ONE)",
+    "author": "PeaceONE",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/real-sounds-mod-by-peaceone-all-in-one",
+    "fileUrl": "https://files.gta5-mods.com/uploads/real-sounds-mod-by-peaceone-all-in-one/dcd8dc-PeaceONE%20Real%20Sound%20Mod%20%28ALL%20IN%20ONE%29%202.0.rar",
+    "archiveBytes": 44622218,
+    "format": "mixed",
+    "files": [],
+    "hasLoose": false,
+    "notes": "Real engine sounds (accel, decel, idle, exhaust, startup) for several high-end cars.",
+    "downloaded": false
   }
 ]

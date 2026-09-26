@@ -7,16 +7,17 @@ import { loadModCar, modCarVisual, type Template } from './modcar';
 import { BASE, GARAGE, RIVAL_GARAGE, type CarTuning } from './tuning';
 
 /** Garage order: number keys 1–9 pick these. */
+// Engine sounds come from sound mods of the closest real engines (public/mods/audio)
 const CARS = [
-  { id: 'lambo-huracan', paint: 0x6fbf1f },
-  { id: 'ferrari-sf90', paint: 0xc4121c },
-  { id: 'bugatti-chiron', paint: 0x1f4fbf },
-  { id: 'lambo-centenario', paint: 0x2a2d33 },
-  { id: 'ferrari-812', paint: 0xd8d8dc },
-  { id: 'bugatti-divo', paint: 0x3fa9d6 },
-  { id: 'lambo-terzo', paint: 0xe8e8ec },
-  { id: 'ferrari-fxxk', paint: 0xcf1a1a },
-  { id: 'bugatti-bolide', paint: 0x14161c },
+  { id: 'lambo-huracan', paint: 0x6fbf1f, engine: 'lambo-v12' },
+  { id: 'ferrari-sf90', paint: 0xc4121c, engine: 'ferrari-v8' },
+  { id: 'bugatti-chiron', paint: 0x1f4fbf, engine: 'hyper-v8' },
+  { id: 'lambo-centenario', paint: 0x2a2d33, engine: 'lambo-v12' },
+  { id: 'ferrari-812', paint: 0xd8d8dc, engine: 'ferrari-v12' },
+  { id: 'bugatti-divo', paint: 0x3fa9d6, engine: 'hyper-v8' },
+  { id: 'lambo-terzo', paint: 0xe8e8ec, engine: 'lambo-v12' },
+  { id: 'ferrari-fxxk', paint: 0xcf1a1a, engine: 'ferrari-v12' },
+  { id: 'bugatti-bolide', paint: 0x14161c, engine: 'hyper-v8' },
 ];
 
 interface Spec {
@@ -39,7 +40,7 @@ const heroTemplates = new Map<string, Template>();
 const lodTemplates = new Map<string, Template>();
 
 /** GTA handling units → the arcade model. GTA values are tuned for its own physics, so clamp to what drives well here. */
-function tuningFor(spec: Spec, paint: number, template: () => Template): CarTuning {
+function tuningFor(spec: Spec, paint: number, engine: string, template: () => Template): CarTuning {
   const h = spec.handling ?? {};
   const mass = clamp(h.mass ?? 1500, 1100, 2300);
   const bias = h.driveBiasFront ?? 0.3;
@@ -51,6 +52,7 @@ function tuningFor(spec: Spec, paint: number, template: () => Template): CarTuni
     name: spec.name,
     className: spec.make,
     paint,
+    engineSound: engine,
     makeVisual: (t) => modCarVisual(template(), { paint: t.paint }),
     mass,
     centerOfMassHeight: 0.44,
@@ -76,8 +78,8 @@ export async function loadGarage(first = 0): Promise<void> {
   const specs = await Promise.all(CARS.map((c) => fetch(`/mods/cars/${c.id}.json`).then((r) => r.json() as Promise<Spec>)));
   await Promise.all(CARS.map(async (c) => lodTemplates.set(c.id, await loadModCar(`/mods/cars/${c.id}_lod.glb`))));
   CARS.forEach((c, i) => {
-    GARAGE.push(tuningFor(specs[i], c.paint, () => heroTemplates.get(c.id) ?? lodTemplates.get(c.id)!));
-    RIVAL_GARAGE.push(tuningFor(specs[i], c.paint, () => lodTemplates.get(c.id)!));
+    GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => heroTemplates.get(c.id) ?? lodTemplates.get(c.id)!));
+    RIVAL_GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => lodTemplates.get(c.id)!));
   });
   await ensureHero(first);
 }
