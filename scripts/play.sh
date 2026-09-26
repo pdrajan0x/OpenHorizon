@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Start the dev server and open the game in its own Chromium window on the NVIDIA GPU.
+# With --build it plays a production build instead: a stable snapshot that doesn't reload while
+# source files are being edited.
 # On this hybrid laptop a Wayland Chromium window always renders on the AMD iGPU (EGL follows the
 # compositor), so the game window runs under XWayland with NVIDIA's GLX render offload instead.
 # A separate profile forces a fresh Chromium process so these settings apply.
@@ -7,7 +9,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT=5173
-npx vite --port "$PORT" --strictPort >/dev/null &
+if [[ "${1:-}" == "--build" ]]; then
+  npx vite build --outDir dist-play --emptyOutDir >/dev/null
+  npx vite preview --outDir dist-play --port "$PORT" --strictPort >/dev/null &
+else
+  npx vite --port "$PORT" --strictPort >/dev/null &
+fi
 server=$!
 trap 'kill "$server" 2>/dev/null' EXIT
 until curl -sf "http://localhost:$PORT" >/dev/null; do sleep 0.3; done

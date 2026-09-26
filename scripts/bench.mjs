@@ -23,7 +23,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 
 try {
-  await page.goto(server.resolvedUrls.local[0]);
+  await page.goto(server.resolvedUrls.local[0] + (process.env.BENCH_QUERY ?? ''));
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 2, null, { timeout: 90_000 });
   const gpu = await page.evaluate(() => {
     const gl = document.createElement('canvas').getContext('webgl2');

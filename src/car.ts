@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { buildCar, type CarVisual } from './carModel';
+import { CarDamage, contactImpact, impactFromVelocity, impactStrength } from './damage';
+import type { CarVisual } from './modcar';
 import { DriftBoost } from './drift';
 import type { Controls } from './input';
 import type { CarTuning } from './tuning';
@@ -25,10 +26,12 @@ const isFront = (i: number) => i < 2;
  */
 export class Car {
   readonly body: RAPIER.RigidBody;
+  readonly collider: RAPIER.Collider;
   readonly vehicle: RAPIER.DynamicRayCastVehicleController;
   readonly mesh: THREE.Group;
   readonly visual: CarVisual;
   readonly drift = new DriftBoost();
+  readonly damage: CarDamage;
 
   // Telemetry for camera, HUD, audio
   speed = 0;
@@ -38,6 +41,7 @@ export class Car {
   wheelsInContact = 0;
   braking = false;
   skidAmount = 0; // 0..1, drives skid marks and tire audio
+  powerScale = 1; // engine force multiplier (rival catch-up)
   readonly forward = new THREE.Vector3();
   readonly up = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
@@ -48,11 +52,13 @@ export class Car {
   private readonly right = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
   private readonly tmp = new THREE.Vector3();
+  private readonly before = new THREE.Vector3();
 
   constructor(world: RAPIER.World, scene: THREE.Scene, readonly tuning: CarTuning, position: THREE.Vector3, yaw: number, headlights = false) {
     const t = tuning;
-    this.visual = buildCar(t.design, { paint: t.paint, underglow: t.underglow });
+    this.visual = t.makeVisual(t);
     this.mesh = this.visual.root;
+    this.damage = new CarDamage(this.mesh, { wheels: this.visual.wheels.map((w) => w.steer) });
 
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
@@ -72,7 +78,7 @@ export class Car {
     };
     const wheels = this.visual.wheels;
     const comX = (wheels[0].center.x + wheels[2].center.x) / 2;
-    world.createCollider(
+    this.collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(h.x, h.y, h.z)
         .setTranslation(c.x, c.y, c.z)
         .setMassProperties(t.mass, { x: comX - c.x, y: t.centerOfMassHeight - c.y, z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
@@ -97,8 +103,9 @@ export class Car {
 
     if (headlights) {
       const lamp = new THREE.SpotLight(0xdbe8ff, 350, 80, 0.5, 0.5, 1.3);
-      lamp.position.set(t.design.length / 2 - 0.3, 0.7, 0);
-      lamp.target.position.set(t.design.length / 2 + 20, 0, 0);
+      const nose = this.visual.chassisCenter.x + this.visual.chassisHalf.x;
+      lamp.position.set(nose - 0.3, 0.7, 0);
+      lamp.target.position.set(nose + 20, 0, 0);
       this.mesh.add(lamp, lamp.target);
     }
     scene.add(this.mesh);
@@ -131,7 +138,7 @@ export class Car {
     } else if (c.brake > 0.1) {
       brake = t.brakeForce * c.brake;
     } else if (c.throttle > 0) {
-      drive = t.engineForce * c.throttle * fade(fwd, t.topSpeed);
+      drive = t.engineForce * this.powerScale * c.throttle * fade(fwd, t.topSpeed);
     }
     if (this.drift.boosting) drive += t.boostForce * fade(fwd, t.boostTopSpeed);
     if (drive === 0 && brake === 0) brake = t.coastBrake;
@@ -209,6 +216,33 @@ export class Car {
     const sliding = drifting ? Math.min(1, Math.abs(this.slip) / 0.6) : 0;
     const locking = (c.handbrake || this.braking) && this.speed > 5 ? 0.6 : 0;
     this.skidAmount = grounded ? Math.max(sliding, locking) : 0;
+  }
+
+  /** Call right before world.step(), after fixedUpdate has applied this step's driving impulses. */
+  markVelocity(): void {
+    const v = this.body.linvel();
+    this.before.set(v.x, v.y, v.z);
+  }
+
+  /** Horizontal velocity change over the last world.step(). Collisions show up as spikes. */
+  impact(): number {
+    const v = this.body.linvel();
+    return Math.hypot(v.x - this.before.x, v.z - this.before.z);
+  }
+
+  /**
+   * Dent the body after a hit: call after world.step() with this step's impact(). The contact
+   * manifolds give the point; failing that, the direction of the velocity change does.
+   */
+  applyDamage(world: RAPIER.World, dv: number): void {
+    const strength = impactStrength(dv);
+    if (strength <= 0) return;
+    const v = this.body.linvel();
+    const point = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const found = contactImpact(world, this.collider, point, dir)
+      || impactFromVelocity(new THREE.Vector3(v.x - this.before.x, 0, v.z - this.before.z), this.body.rotation(), this.visual.chassisCenter, this.visual.chassisHalf, point, dir);
+    if (found) this.damage.hitLocal(point, dir, strength);
   }
 
   /** World-space contact point of a wheel, or null when it's in the air. */

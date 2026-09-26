@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const HORIZON = 0x2b1a3d;
-const FOG_DENSITY = 0.0026;
+const FOG_DENSITY = 0.0024;
 const RAIN_DROPS = 6000;
 const RAIN_BOX = 120; // meters around the camera
 const RAIN_HEIGHT = 60;
@@ -9,11 +9,12 @@ const RAIN_HEIGHT = 60;
 /** Night sky, haze, ambient light and rain. */
 export class Atmosphere {
   private readonly rain: THREE.ShaderMaterial;
+  private readonly sky = skyDome();
 
   constructor(scene: THREE.Scene) {
     scene.background = new THREE.Color(HORIZON);
     scene.fog = new THREE.FogExp2(HORIZON, FOG_DENSITY);
-    scene.add(skyDome());
+    scene.add(this.sky);
     scene.add(new THREE.HemisphereLight(0x6a5aa0, 0x0c0816, 0.9));
     const moon = new THREE.DirectionalLight(0x8a96ff, 0.5);
     moon.position.set(-200, 400, 150);
@@ -55,12 +56,15 @@ export class Atmosphere {
   }
 
   update(time: number, camera: THREE.Vector3): void {
+    // The dome rides with the camera: the map can be kilometers from the origin
+    this.sky.position.copy(camera);
     this.rain.uniforms.uTime.value = time;
     this.rain.uniforms.uCam.value.copy(camera);
   }
 
   /** Photograph the lit city into an environment map, so glossy paint and wet asphalt reflect it. */
   captureEnvironment(renderer: THREE.WebGLRenderer, scene: THREE.Scene, at: THREE.Vector3): void {
+    this.sky.position.copy(at);
     const target = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
     const camera = new THREE.CubeCamera(1, 3000, target);
     camera.position.copy(at);

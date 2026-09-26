@@ -13,6 +13,7 @@ export interface Actions {
   camera: boolean;
   fps: boolean;
   help: boolean;
+  quit: boolean; // leave the current event
   car: number | null; // garage slot picked with the number keys
 }
 
@@ -27,7 +28,8 @@ const KEYS = {
   camera: ['KeyC'],
   fps: ['KeyF'],
   help: ['KeyH'],
-  cars: ['Digit1', 'Digit2', 'Digit3'],
+  quit: ['Backspace', 'Escape'],
+  cars: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'],
 };
 
 // Standard gamepad mapping
@@ -75,6 +77,7 @@ export class Input {
       camera: tapped(KEYS.camera),
       fps: tapped(KEYS.fps),
       help: tapped(KEYS.help),
+      quit: tapped(KEYS.quit),
       car: KEYS.cars.findIndex((code) => this.pressed.has(code)),
     };
     if (actions.car === -1) actions.car = null;

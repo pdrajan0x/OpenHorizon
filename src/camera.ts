@@ -21,10 +21,32 @@ export class ChaseCamera {
   private readonly tmp = new THREE.Vector3();
   private fov = BASE_FOV;
   private time = 0;
+  private orbit = 0;
   private snapped = false;
 
   toggle(): void {
     this.mode = this.mode === 'chase' ? 'cockpit' : 'chase';
+    this.snapped = false;
+  }
+
+  /**
+   * Crash cam: a slow orbit around the wreck, starting behind where the car was heading.
+   * `t` is seconds since the crash.
+   */
+  crash(t: number, car: Car, clearance: Clearance): void {
+    const p = car.body.translation();
+    const focus = this.carPos.set(p.x, p.y + 0.6, p.z);
+    if (t === 0) this.orbit = Math.atan2(-this.dir.z, -this.dir.x);
+    const angle = this.orbit + t * 0.9;
+    const want = this.tmp.set(focus.x + Math.cos(angle) * 8, focus.y + 2.2 + t * 0.6, focus.z + Math.sin(angle) * 8);
+    const reach = focus.distanceTo(want);
+    const clear = clearance(focus, want);
+    if (clear < reach) want.lerpVectors(focus, want, Math.max(0.3, clear - WALL_MARGIN) / reach);
+    this.camera.position.copy(want);
+    this.camera.lookAt(focus);
+    this.fov += (BASE_FOV - 6 - this.fov) * 0.1;
+    this.camera.fov = this.fov;
+    this.camera.updateProjectionMatrix();
     this.snapped = false;
   }
 

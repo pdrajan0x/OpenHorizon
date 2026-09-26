@@ -1,67 +1,117 @@
-// Ambient traffic: cars follow lanes on the street grid, stop for red lights and for whatever is
-// ahead of them, and turn right at some intersections. They are dynamic bodies steered by velocity,
-// so a hard hit knocks them out of their lane and plain physics takes over ("wrecked").
-// Only a population around the player exists; cars spawn and despawn with distance.
+// Ambient traffic on the map's road network: cars drive the path graph in right-hand lanes, pick a
+// turn at each junction, slow for corners and queue behind whatever is ahead. They are dynamic bodies
+// steered by velocity, so a hard hit knocks them out of their lane and plain physics takes over
+// ("wrecked"). Only a population around the player exists; cars spawn and despawn with distance.
+// The cars are mod models drawn with GPU instancing: one draw call per model part for all cars.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { BLOCKS, isLotSegment, LANES, ROAD, signalAt, streetAt } from './city';
-import { buildTrafficCar, DESIGNS, type CarShape } from './carModel';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshoptSimplifier } from 'meshoptimizer';
+import { CAR_GROUP, type RoadGraph, type RoadLink } from './map';
+import { modCarVisual, type Template } from './modcar';
 import { mulberry32, pick } from './random';
 
 const CRUISE = 13; // m/s, about 47 km/h
+const CORNER_SPEED = 6;
 const ACCEL = 3;
 const BRAKE = 7;
-const STOP_DECEL = 3.5; // planned deceleration toward a red light
-const STOP_BACK = 1.5; // stop line distance before the intersection box
-const FOLLOW_GAP = 7.5; // center-to-center distance when queued
+const FOLLOW_GAP = 8; // center-to-center distance when queued
 const LOOK_AHEAD = 32;
+const JUNCTION_APPROACH = 22; // m before a junction where cars start checking it
+const JUNCTION_BOX = 7; // m around the junction node that counts as occupied
+const JUNCTION_STOP = 11; // m short of the node where a yielding car waits
 const CORRIDOR = 2.3; // half-width of the lane corridor checked for a leader
 const SPAWN_MIN = 90;
-const SPAWN_MAX = 260;
-const SPAWN_SPACING = 14;
+const SPAWN_MAX = 280;
+const SPAWN_SPACING = 16;
 const DESPAWN = 320;
 const WRECK_DESPAWN = 70;
 const WRECK_SPEED_JUMP = 4; // m/s of unexpected velocity change that knocks a car out of its lane
-const WRECK_DRIFT = 3; // meters off its path
-const RIGHT_TURN_CHANCE = 0.35;
+const WRECK_DRIFT = 3.5; // meters off its path
 const POSITION_GAIN = 4;
+const HEIGHT_GAIN = 8;
+// Driving cars touch only other cars: the city's collision mesh has seams and curbs that would jolt
+// them out of lane. They ride the road height from the path nodes instead. Wrecks collide with everything.
+const DRIVING_GROUPS = (CAR_GROUP << 16) | CAR_GROUP;
+const WRECK_GROUPS = (CAR_GROUP << 16) | 0xffff;
 const YAW_GAIN = 8;
-const MASS = 1400;
-const DESIGN_POOL = [DESIGNS.sedan, DESIGNS.sedan, DESIGNS.taxi, DESIGNS.suv, DESIGNS.hatch, DESIGNS.hatch, DESIGNS.van];
-const PAINTS = [0x1c1e24, 0x8a8f99, 0xc9ccd2, 0x2b3a55, 0x5a1f24, 0x1f4a3a, 0x3a3a40, 0xe0e0e0];
-const TAXI_YELLOW = 0xf2b705;
+const MASS = 1500;
+const LANE_WIDTH = 3.4;
+const PAINTS = [0x1c1e24, 0x8a8f99, 0xc9ccd2, 0x2b3a55, 0x5a1f24, 0x1f4a3a, 0x3a3a40, 0xe0e0e0, 0x6b5a3a];
+const TAXI_PAINT = 0xf2b705;
+const INTERIOR = /interior|dash|cloth|badges/; // shaders traffic never shows well enough to pay for
+const SIMPLIFY_RATIO = 0.25;
+const TRAFFIC_GLASS = new THREE.MeshStandardMaterial({ color: 0x07090d, roughness: 0.08, metalness: 0.7 });
+const SIMPLIFY_ERROR = 0.02; // relative to the mesh size
 
-type Axis = 0 | 1;
-/** A direction of travel along one street, in one lane. `street` is the index of the street driven along. */
-interface Leg {
-  axis: Axis;
-  dir: 1 | -1;
-  street: number;
-  lane: 0 | 1;
+/** A traffic car as other systems see it: near-miss checks, rival avoidance. */
+export interface Agent {
+  id: number;
+  x: number;
+  z: number;
+  vx: number;
+  vz: number;
+  wrecked: boolean;
 }
-interface Path {
-  points: THREE.Vector3[];
-  cum: number[];
-  length: number;
-  /** Set on approach paths: the signal controlling the stop line at the end. */
-  signal: { ix: number; iz: number; axis: Axis } | null;
+
+/** One traffic model: its visual parts, instanced for every car that uses it. */
+class Fleet {
+  readonly parts: { mesh: THREE.InstancedMesh; local: THREE.Matrix4; paint: boolean }[] = [];
+  readonly chassisCenter: THREE.Vector3;
+  readonly chassisHalf: THREE.Vector3;
+  readonly slots: (TrafficCar | null)[];
+
+  constructor(scene: THREE.Scene, template: Template, readonly taxi: boolean, capacity: number) {
+    const visual = modCarVisual(template, { paint: 0xffffff });
+    visual.root.updateMatrixWorld(true);
+    // Bake every part into one geometry per material, so a car model costs one draw call per material
+    const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    visual.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const material = mesh.material as THREE.Material;
+      if (INTERIOR.test((material.userData as { shader?: string }).shader ?? '')) return;
+      const list = byMaterial.get(material) ?? [];
+      list.push(plainGeometry(mesh.geometry).applyMatrix4(mesh.matrixWorld));
+      byMaterial.set(material, list);
+    });
+    for (const [material, geos] of byMaterial) {
+      const geometry = mergeGeometries(geos, false);
+      if (!geometry) continue;
+      simplify(geometry);
+      // Transparent glass is by far the most expensive part of a car to draw; traffic gets tinted opaque windows
+      const shaded = material.transparent ? TRAFFIC_GLASS : material;
+      const inst = new THREE.InstancedMesh(geometry, shaded, capacity);
+      inst.count = 0;
+      inst.visible = false;
+      inst.frustumCulled = false;
+      const paint = (material as THREE.MeshPhysicalMaterial).clearcoat === 1;
+      if (paint) inst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+      scene.add(inst);
+      this.parts.push({ mesh: inst, local: new THREE.Matrix4(), paint });
+    }
+    this.chassisCenter = visual.chassisCenter;
+    this.chassisHalf = visual.chassisHalf;
+    this.slots = new Array(capacity).fill(null);
+  }
 }
 
 class TrafficCar {
   active = false;
   wrecked = false;
   wreckedAt = 0;
-  leg: Leg = { axis: 0, dir: 1, street: 0, lane: 0 };
-  next = 0; // index of the cross street ahead
-  path: Path = makePath([new THREE.Vector3(), new THREE.Vector3(1, 0, 0)], null);
-  queued: Path | null = null; // approach that follows the current crossing
-  s = 0;
+  link!: RoadLink;
+  forwardOnLink = true; // driving a→b
+  lane = 0;
+  s = 0; // meters along the link
+  next = -1; // node after the end of this link
   speed = 0;
+  paint = new THREE.Color();
   readonly position = new THREE.Vector3();
   readonly forward = new THREE.Vector3(1, 0, 0);
   readonly commanded = new THREE.Vector3();
 
-  constructor(readonly body: RAPIER.RigidBody, readonly root: THREE.Group, readonly shape: CarShape, readonly cruise: number) {}
+  constructor(readonly body: RAPIER.RigidBody, readonly fleet: Fleet, readonly slot: number, readonly cruise: number) {}
 }
 
 export class Traffic {
@@ -69,66 +119,77 @@ export class Traffic {
   private readonly rng = mulberry32(451);
   private readonly target = new THREE.Vector3();
   private readonly tangent = new THREE.Vector3();
+  private readonly m = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly one = new THREE.Vector3(1, 1, 1);
   private filled = false;
 
-  constructor(world: RAPIER.World, scene: THREE.Scene, count: number) {
+  constructor(world: RAPIER.World, scene: THREE.Scene, private readonly roads: RoadGraph, models: { template: Template; taxi: boolean }[], count: number) {
+    if (models.length === 0 || count === 0) return;
+    const per = Math.ceil(count / models.length);
+    const fleets = models.map((m) => new Fleet(scene, m.template, m.taxi, per));
     for (let k = 0; k < count; k++) {
-      const design = pick(this.rng, DESIGN_POOL);
-      const paint = design === DESIGNS.taxi ? TAXI_YELLOW : pick(this.rng, PAINTS);
-      const { root, shape } = buildTrafficCar(design, paint);
-      root.visible = false;
-      scene.add(root);
+      const fleet = fleets[k % fleets.length];
+      const slot = Math.floor(k / fleets.length);
       const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setEnabled(false).setCcdEnabled(true));
-      const c = shape.chassisCenter;
-      const h = shape.chassisHalf;
+      const c = fleet.chassisCenter;
+      const h = fleet.chassisHalf;
       const inertia = {
         x: (MASS / 12) * ((2 * h.y) ** 2 + (2 * h.z) ** 2),
         y: (MASS / 12) * ((2 * h.x) ** 2 + (2 * h.z) ** 2),
         z: (MASS / 12) * ((2 * h.x) ** 2 + (2 * h.y) ** 2),
       };
+      // The box reaches down to the ground so the car rests on it without wheels
+      const bottom = 0.05;
+      const top = c.y + h.y;
       world.createCollider(
-        RAPIER.ColliderDesc.cuboid(h.x, h.y, h.z)
-          .setTranslation(c.x, c.y, c.z)
-          .setMassProperties(MASS, { x: 0, y: 0.5 - c.y, z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
+        RAPIER.ColliderDesc.cuboid(h.x, (top - bottom) / 2, h.z)
+          .setCollisionGroups(DRIVING_GROUPS)
+          .setTranslation(c.x, (top + bottom) / 2, c.z)
+          .setMassProperties(MASS, { x: 0, y: 0.5 - (top + bottom) / 2, z: 0 }, inertia, { x: 0, y: 0, z: 0, w: 1 })
           .setFriction(0.3),
         body,
       );
-      this.cars.push(new TrafficCar(body, root, shape, CRUISE * (0.85 + this.rng() * 0.25)));
+      const car = new TrafficCar(body, fleet, slot, CRUISE * (0.85 + this.rng() * 0.25));
+      car.paint.set(fleet.taxi ? TAXI_PAINT : pick(this.rng, PAINTS));
+      fleet.slots[slot] = car;
+      this.cars.push(car);
     }
   }
 
   /** Plan speeds and steer every lane-following car. Call before world.step(). */
-  fixedUpdate(dt: number, time: number, player: THREE.Vector3): void {
+  fixedUpdate(dt: number, _time: number, player: THREE.Vector3): void {
     for (const car of this.cars) {
       if (!car.active || car.wrecked) continue;
       const p = car.body.translation();
-      car.position.set(p.x, 0, p.z);
+      car.position.set(p.x, p.y, p.z);
 
       let desired = car.cruise;
-      const sig = car.path.signal;
-      if (sig) {
-        const remaining = car.path.length - car.s;
-        const light = signalAt(sig.ix, sig.iz, sig.axis, time);
-        if (light === 'red' || (light === 'yellow' && remaining > 12)) {
-          desired = Math.min(desired, Math.sqrt(2 * STOP_DECEL * Math.max(0, remaining - 0.3)));
-        }
-      } else if (this.isTurning(car)) {
-        desired *= 0.55;
+      const remaining = car.link.length - car.s;
+      const turn = this.turnAngle(car);
+      if (turn > 0.5 && remaining < 25) desired = Math.min(desired, CORNER_SPEED + remaining * 0.3);
+      // Unsignalled junctions: wait short of the node while someone else is crossing it
+      const end = this.endNode(car);
+      if (remaining < JUNCTION_APPROACH && this.roads.adjacent[end].length >= 3) {
+        const node = this.roads.nodes[end];
+        const busy = this.cars.some((o) => o !== car && o.active && !o.wrecked
+          && Math.hypot(o.position.x - node.x, o.position.z - node.z) < JUNCTION_BOX
+          && o.forward.x * car.forward.x + o.forward.z * car.forward.z < 0.7);
+        if (busy) desired = Math.min(desired, Math.max(0, (remaining - JUNCTION_STOP) * 1.2));
       }
       const gap = this.gapAhead(car, player);
       if (gap < LOOK_AHEAD) desired = Math.min(desired, Math.max(0, (gap - FOLLOW_GAP) * 1.2));
       car.speed += THREE.MathUtils.clamp(desired - car.speed, -BRAKE * dt, ACCEL * dt);
 
       this.advance(car, car.speed * dt);
-      pointOn(car.path, car.s, this.target, this.tangent);
+      this.lanePoint(car, car.s, this.target, this.tangent);
       car.forward.copy(this.tangent);
       car.commanded.set(
         this.tangent.x * car.speed + (this.target.x - p.x) * POSITION_GAIN,
         0,
         this.tangent.z * car.speed + (this.target.z - p.z) * POSITION_GAIN,
       );
-      const v = car.body.linvel();
-      car.body.setLinvel({ x: car.commanded.x, y: v.y, z: car.commanded.z }, true);
+      car.body.setLinvel({ x: car.commanded.x, y: (this.target.y - p.y) * HEIGHT_GAIN, z: car.commanded.z }, true);
       const r = car.body.rotation();
       const yaw = 2 * Math.atan2(r.y, r.w);
       const targetYaw = Math.atan2(-this.tangent.z, this.tangent.x);
@@ -142,39 +203,29 @@ export class Traffic {
       if (!car.active || car.wrecked) continue;
       const v = car.body.linvel();
       const p = car.body.translation();
-      pointOn(car.path, car.s, this.target, this.tangent);
+      this.lanePoint(car, car.s, this.target, this.tangent);
       const jump = Math.hypot(v.x - car.commanded.x, v.z - car.commanded.z);
       const off = Math.hypot(p.x - this.target.x, p.z - this.target.z);
       if (jump > WRECK_SPEED_JUMP || off > WRECK_DRIFT) this.wreck(car, time);
     }
   }
 
-  /** Despawn far cars, spawn new ones around the player, and move meshes to their bodies. */
+  /** Despawn far cars, spawn new ones around the player, and move the instances to their bodies. */
   update(time: number, player: THREE.Vector3): void {
     for (const car of this.cars) {
       if (!car.active) continue;
       const p = car.body.translation();
       const dist = Math.hypot(p.x - player.x, p.z - player.z);
-      if (dist > DESPAWN || (car.wrecked && dist > WRECK_DESPAWN && time - car.wreckedAt > 4) || p.y < -10) {
-        car.active = false;
-        car.body.setEnabled(false);
-        car.root.visible = false;
-      }
+      const road = this.roads.nodes[car.link.a].y;
+      if (dist > DESPAWN || (car.wrecked && dist > WRECK_DESPAWN && time - car.wreckedAt > 4) || p.y < road - 15) this.deactivate(car);
     }
     let budget = this.filled ? 3 : Infinity;
     for (const car of this.cars) {
       if (car.active || budget <= 0) continue;
-      if (this.spawn(car, player, this.filled ? SPAWN_MIN : 25)) budget--;
+      if (this.spawn(car, player, this.filled ? SPAWN_MIN : 30)) budget--;
     }
     this.filled = true;
-
-    for (const car of this.cars) {
-      if (!car.active) continue;
-      const p = car.body.translation();
-      const r = car.body.rotation();
-      car.root.position.set(p.x, p.y, p.z);
-      car.root.quaternion.set(r.x, r.y, r.z, r.w);
-    }
+    this.render();
   }
 
   positions(): THREE.Vector3[] {
@@ -182,6 +233,28 @@ export class Traffic {
       const p = c.body.translation();
       return new THREE.Vector3(p.x, p.y, p.z);
     });
+  }
+
+  /** Active cars within `radius` of (x, z). */
+  nearby(x: number, z: number, radius: number): Agent[] {
+    const out: Agent[] = [];
+    this.cars.forEach((c, id) => {
+      if (!c.active) return;
+      const p = c.body.translation();
+      if (Math.abs(p.x - x) > radius || Math.abs(p.z - z) > radius) return;
+      const v = c.body.linvel();
+      out.push({ id, x: p.x, z: p.z, vx: v.x, vz: v.z, wrecked: c.wrecked });
+    });
+    return out;
+  }
+
+  /** Despawn every car within `radius` of (x, z), to clear an event's starting grid. */
+  clearAround(x: number, z: number, radius: number): void {
+    for (const c of this.cars) {
+      if (!c.active) continue;
+      const p = c.body.translation();
+      if (Math.hypot(p.x - x, p.z - z) < radius) this.deactivate(c);
+    }
   }
 
   stats(): { active: number; moving: number; wrecked: number; avgSpeed: number } {
@@ -195,44 +268,71 @@ export class Traffic {
     };
   }
 
-  private spawn(car: TrafficCar, player: THREE.Vector3, minDist: number): boolean {
-    for (let attempt = 0; attempt < 25; attempt++) {
-      const leg: Leg = {
-        axis: this.rng() < 0.5 ? 0 : 1,
-        dir: this.rng() < 0.5 ? 1 : -1,
-        street: Math.floor(this.rng() * (BLOCKS + 1)),
-        lane: this.rng() < 0.5 ? 0 : 1,
-      };
-      const seg = Math.floor(this.rng() * BLOCKS);
-      if (isLotSegment(leg.axis, leg.street, seg, seg + 1)) continue;
-      const along = THREE.MathUtils.lerp(streetAt(seg) + ROAD / 2 + 8, streetAt(seg + 1) - ROAD / 2 - 8, this.rng());
-      const p = lanePoint(leg, along);
-      const dist = Math.hypot(p.x - player.x, p.z - player.z);
-      if (dist < minDist || dist > SPAWN_MAX) continue;
-      if (this.cars.some((o) => o.active && o.position.distanceTo(p) < SPAWN_SPACING)) continue;
+  private render(): void {
+    const fleets = new Set(this.cars.map((c) => c.fleet));
+    for (const fleet of fleets) {
+      let n = 0;
+      for (const car of fleet.slots) {
+        if (!car?.active) continue;
+        const p = car.body.translation();
+        const r = car.body.rotation();
+        this.m.compose(this.target.set(p.x, p.y, p.z), this.q.set(r.x, r.y, r.z, r.w), this.one);
+        for (const part of fleet.parts) {
+          part.mesh.setMatrixAt(n, this.tangentMatrix.multiplyMatrices(this.m, part.local));
+          if (part.paint) part.mesh.setColorAt(n, car.paint);
+        }
+        n++;
+      }
+      for (const part of fleet.parts) {
+        part.mesh.count = n;
+        part.mesh.visible = n > 0;
+        part.mesh.instanceMatrix.needsUpdate = true;
+        if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
+      }
+    }
+  }
 
-      car.leg = leg;
-      car.next = leg.dir > 0 ? seg + 1 : seg;
-      car.path = approach(leg, along, car.next);
-      car.queued = null;
-      car.s = 0;
+  private readonly tangentMatrix = new THREE.Matrix4();
+
+  private deactivate(car: TrafficCar): void {
+    car.active = false;
+    car.body.setEnabled(false);
+  }
+
+  private spawn(car: TrafficCar, player: THREE.Vector3, minDist: number): boolean {
+    const links = this.roads.links;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const link = links[Math.floor(this.rng() * links.length)];
+      const forward = this.rng() < 0.5 ? link.lanesAB > 0 : link.lanesBA === 0;
+      const lanes = forward ? link.lanesAB : link.lanesBA;
+      if (lanes === 0 || link.length < 10) continue;
+      car.link = link;
+      car.forwardOnLink = forward;
+      car.lane = Math.floor(this.rng() * lanes);
+      car.s = link.length * (0.2 + this.rng() * 0.6);
+      this.lanePoint(car, car.s, this.target, this.tangent);
+      const dist = Math.hypot(this.target.x - player.x, this.target.z - player.z);
+      if (dist < minDist || dist > SPAWN_MAX) continue;
+      if (this.cars.some((o) => o.active && o.position.distanceTo(this.target) < SPAWN_SPACING)) continue;
+
+      car.next = this.chooseNext(car);
       car.speed = car.cruise * 0.8;
       car.active = true;
       car.wrecked = false;
-      car.position.copy(p);
-      const f = forwardOf(leg);
-      car.forward.copy(f);
-      car.commanded.copy(f).multiplyScalar(car.speed);
+      car.position.copy(this.target);
+      car.forward.copy(this.tangent);
+      car.commanded.copy(this.tangent).multiplyScalar(car.speed);
       const body = car.body;
       body.setEnabled(true);
-      body.setTranslation({ x: p.x, y: 0.05, z: p.z }, true);
-      body.setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-f.z, f.x)), true);
+      body.setTranslation({ x: this.target.x, y: this.target.y, z: this.target.z }, true);
+      body.setRotation(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-this.tangent.z, this.tangent.x)), true);
       body.setLinvel({ x: car.commanded.x, y: 0, z: car.commanded.z }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       body.setEnabledRotations(false, true, false, true);
       body.setLinearDamping(0);
       body.setAngularDamping(0);
-      car.root.visible = true;
+      body.setGravityScale(0, true);
+      body.collider(0).setCollisionGroups(DRIVING_GROUPS);
       return true;
     }
     return false;
@@ -242,6 +342,8 @@ export class Traffic {
     car.wrecked = true;
     car.wreckedAt = time;
     car.body.setEnabledRotations(true, true, true, true);
+    car.body.setGravityScale(1, true);
+    car.body.collider(0).setCollisionGroups(WRECK_GROUPS);
     car.body.setLinearDamping(0.5);
     car.body.setAngularDamping(0.8);
   }
@@ -262,96 +364,99 @@ export class Traffic {
     return gap;
   }
 
-  private isTurning(car: TrafficCar): boolean {
-    return car.path.points.length > 2;
+  private startNode(car: TrafficCar): number {
+    return car.forwardOnLink ? car.link.a : car.link.b;
   }
 
-  /** Move along the route, stitching approach → crossing → approach as each path runs out. */
+  private endNode(car: TrafficCar): number {
+    return car.forwardOnLink ? car.link.b : car.link.a;
+  }
+
+  /** Pick where to go at the end of the current link: any other road with lanes our way, else turn back. */
+  private chooseNext(car: TrafficCar): number {
+    const end = this.endNode(car);
+    const from = this.startNode(car);
+    const options = this.roads.adjacent[end].filter(({ link, other }) =>
+      other !== from && (link.a === end ? link.lanesAB : link.lanesBA) > 0);
+    if (options.length === 0) return from;
+    return options[Math.floor(this.rng() * options.length)].other;
+  }
+
+  /** How sharply the car turns at the end of this link (radians). */
+  private turnAngle(car: TrafficCar): number {
+    const nodes = this.roads.nodes;
+    const a = nodes[this.startNode(car)];
+    const b = nodes[this.endNode(car)];
+    const c = nodes[car.next];
+    const d1x = b.x - a.x, d1z = b.z - a.z, d2x = c.x - b.x, d2z = c.z - b.z;
+    const l = Math.hypot(d1x, d1z) * Math.hypot(d2x, d2z) || 1;
+    return Math.acos(THREE.MathUtils.clamp((d1x * d2x + d1z * d2z) / l, -1, 1));
+  }
+
+  /** Move along the route, stepping onto the chosen next link at each node. */
   private advance(car: TrafficCar, ds: number): void {
     car.s += ds;
-    while (car.s > car.path.length) {
-      car.s -= car.path.length;
-      if (car.path.signal) {
-        const next = crossing(car.leg, car.next, this.rng);
-        car.path = next.path;
-        car.leg = next.leg;
-        car.next = next.next;
-        car.queued = next.then;
-      } else {
-        car.path = car.queued ?? car.path;
-        car.queued = null;
-      }
+    while (car.s > car.link.length) {
+      car.s -= car.link.length;
+      const end = this.endNode(car);
+      const next = car.next;
+      const link = this.roads.adjacent[end].find((e) => e.other === next)?.link;
+      if (!link) return;
+      car.link = link;
+      car.forwardOnLink = link.a === end;
+      const lanes = car.forwardOnLink ? link.lanesAB : link.lanesBA;
+      car.lane = Math.min(car.lane, Math.max(0, lanes - 1));
+      car.next = this.chooseNext(car);
     }
   }
-}
 
-// --- Route geometry ---
-
-function forwardOf(leg: Leg): THREE.Vector3 {
-  return leg.axis === 0 ? new THREE.Vector3(leg.dir, 0, 0) : new THREE.Vector3(0, 0, leg.dir);
-}
-
-/** Point on a leg's lane at coordinate `along` of its travel axis. Lanes sit right of the centerline. */
-function lanePoint(leg: Leg, along: number): THREE.Vector3 {
-  const offset = leg.dir * LANES[leg.lane];
-  return leg.axis === 0
-    ? new THREE.Vector3(along, 0, streetAt(leg.street) + offset)
-    : new THREE.Vector3(streetAt(leg.street) - offset, 0, along);
-}
-
-/** Straight run from `from` to the stop line before cross street `next`. */
-function approach(leg: Leg, from: number, next: number): Path {
-  const stop = streetAt(next) - leg.dir * (ROAD / 2 + STOP_BACK);
-  const [ix, iz] = leg.axis === 0 ? [next, leg.street] : [leg.street, next];
-  return makePath([lanePoint(leg, from), lanePoint(leg, stop)], { ix, iz, axis: leg.axis });
-}
-
-/**
- * Through the intersection with cross street `next`: straight on, or a right turn. Left turns only
- * happen where nothing else is open (city corners, the lot edge), so paths never cross oncoming traffic.
- */
-function crossing(leg: Leg, next: number, rng: () => number): { path: Path; leg: Leg; next: number; then: Path } {
-  const start = lanePoint(leg, streetAt(next) - leg.dir * (ROAD / 2 + STOP_BACK));
-  const straightNext = next + leg.dir;
-  const canStraight = straightNext >= 0 && straightNext <= BLOCKS && !isLotSegment(leg.axis, leg.street, next, straightNext);
-  // Right of travel: heading +x turns onto +z; heading +z turns onto -x
-  const rightDir = (leg.axis === 0 ? leg.dir : -leg.dir) as 1 | -1;
-  const other = (1 - leg.axis) as Axis;
-  const canRight = leg.street + rightDir >= 0 && leg.street + rightDir <= BLOCKS && !isLotSegment(other, next, leg.street, leg.street + rightDir);
-  const turnRight = canRight && (!canStraight || (leg.lane === 1 && rng() < RIGHT_TURN_CHANCE));
-
-  if (!turnRight && canStraight) {
-    const exitAt = streetAt(next) + leg.dir * (ROAD / 2);
-    const path = makePath([start, lanePoint(leg, exitAt)], null);
-    return { path, leg, next: straightNext, then: approach(leg, exitAt, straightNext) };
+  /** Point in the car's lane at distance s along its link, and the travel direction there. */
+  private lanePoint(car: TrafficCar, s: number, point: THREE.Vector3, tangent: THREE.Vector3): void {
+    const a = this.roads.nodes[this.startNode(car)];
+    const b = this.roads.nodes[this.endNode(car)];
+    const t = THREE.MathUtils.clamp(s / Math.max(1e-6, car.link.length), 0, 1);
+    tangent.subVectors(b, a).setY(0).normalize();
+    point.lerpVectors(a, b, t);
+    const twoWay = car.link.lanesAB > 0 && car.link.lanesBA > 0;
+    const lanes = car.forwardOnLink ? car.link.lanesAB : car.link.lanesBA;
+    // Right of travel: heading +x has +z on its right. One-way roads spread lanes across the middle.
+    const offset = twoWay ? LANE_WIDTH * (car.lane + 0.5) : LANE_WIDTH * (car.lane - (lanes - 1) / 2);
+    point.x += -tangent.z * offset;
+    point.z += tangent.x * offset;
   }
-  const turnDir = (turnRight ? rightDir : -rightDir) as 1 | -1;
-  const newLeg: Leg = { axis: (1 - leg.axis) as Axis, dir: turnDir, street: next, lane: turnRight ? 1 : 0 };
-  const exitAt = streetAt(leg.street) + turnDir * (ROAD / 2);
-  const end = lanePoint(newLeg, exitAt);
-  const k = start.distanceTo(end) * 0.4;
-  const p1 = start.clone().addScaledVector(forwardOf(leg), k);
-  const p2 = end.clone().addScaledVector(forwardOf(newLeg), -k);
-  const curve = new THREE.CubicBezierCurve3(start, p1, p2, end);
-  const newNext = leg.street + turnDir;
-  return { path: makePath(curve.getPoints(14), null), leg: newLeg, next: newNext, then: approach(newLeg, exitAt, newNext) };
 }
 
-function makePath(points: THREE.Vector3[], signal: Path['signal']): Path {
-  const cum = [0];
-  for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + points[i].distanceTo(points[i - 1]));
-  return { points, cum, length: cum[cum.length - 1], signal };
+/** Reduce a merged traffic part to a fraction of its triangles (meshoptimizer; call after it's ready). */
+function simplify(g: THREE.BufferGeometry): void {
+  const index = g.index;
+  if (!index || index.count < 600) return;
+  const indices = new Uint32Array(index.array as ArrayLike<number>);
+  const positions = g.getAttribute('position').array as Float32Array;
+  const target = Math.floor((indices.length * SIMPLIFY_RATIO) / 3) * 3;
+  // Parts are unwelded and full of UV seams: let the simplifier collapse across them and drop specks
+  const [reduced] = MeshoptSimplifier.simplify(indices, positions, 3, target, SIMPLIFY_ERROR, ['Permissive', 'Prune']);
+  g.setIndex(new THREE.BufferAttribute(reduced, 1));
 }
 
-function pointOn(path: Path, s: number, point: THREE.Vector3, tangent: THREE.Vector3): void {
-  const { points, cum } = path;
-  let i = 1;
-  while (i < points.length - 1 && cum[i] < s) i++;
-  const a = points[i - 1];
-  const b = points[i];
-  const t = THREE.MathUtils.clamp((s - cum[i - 1]) / Math.max(1e-6, cum[i] - cum[i - 1]), 0, 1);
-  point.lerpVectors(a, b, t);
-  tangent.subVectors(b, a).normalize();
+/** Position/normal/uv as plain float attributes (models may use quantized ones), ready to merge. */
+function plainGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const a = g.getAttribute(name);
+    if (!a) continue;
+    const size = a.itemSize;
+    const arr = new Float32Array(a.count * size);
+    for (let i = 0; i < a.count; i++) {
+      arr[i * size] = a.getX(i);
+      if (size > 1) arr[i * size + 1] = a.getY(i);
+      if (size > 2) arr[i * size + 2] = a.getZ(i);
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  if (!out.getAttribute('uv')) out.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(out.getAttribute('position').count * 2), 2));
+  if (!out.getAttribute('normal')) out.computeVertexNormals();
+  if (g.index) out.setIndex(Array.from(g.index.array as ArrayLike<number>));
+  return out;
 }
 
 function wrapAngle(a: number): number {

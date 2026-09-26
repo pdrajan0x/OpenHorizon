@@ -78,6 +78,17 @@ export class DriftBoost {
     }
   }
 
+  /** Boost earned by other stunts: near misses, oncoming, air, takedowns. */
+  award(segments: number): void {
+    this.meter = Math.min(BOOST_SEGMENTS, this.meter + segments);
+  }
+
+  /** A crash drops the segment that was still filling and ends any drift or boost. */
+  crashed(): void {
+    this.meter = Math.floor(this.meter);
+    this.reset();
+  }
+
   reset(): void {
     this.drifting = false;
     this.boosting = false;

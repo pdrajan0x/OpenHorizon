@@ -1,0 +1,519 @@
+// A city from a GTA V map mod, converted by `gta5conv map` into public/mods/maps/<id>/ (see
+// tools/gta5conv/MapWriter.cs for the format). Streams render cells around the camera and collision
+// cells around the player, and exposes the mod's vehicle path nodes as a road graph for traffic,
+// rivals, events and the GPS.
+import RAPIER from '@dimforge/rapier3d-compat';
+import * as THREE from 'three';
+
+const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
+const COLLISION_RADIUS = 340; // m of collision around the player and rivals (traffic lives within ~300 m)
+const LOADS_PER_FRAME = 2;
+/** Collision groups: the city is in STATIC_GROUP; lane-following traffic skips it (see traffic.ts). */
+export const STATIC_GROUP = 0x0001;
+export const CAR_GROUP = 0x0002;
+const groups = (member: number, filter: number) => (member << 16) | filter;
+export const STATIC_GROUPS = groups(STATIC_GROUP, 0xffff);
+
+interface CellInfo {
+  id: number;
+  x: number;
+  z: number;
+  render: boolean;
+  collision: boolean;
+  triangles: number;
+  textures: string[];
+}
+interface MaterialInfo {
+  shader: string;
+  diffuse: string | null;
+  normal: string | null;
+  emissive: boolean;
+  blend: boolean;
+  mask: boolean;
+}
+interface Manifest {
+  origin: number[];
+  cellSize: number;
+  spawn: number[];
+  cells: CellInfo[];
+  materials: MaterialInfo[];
+}
+
+export class GameMap {
+  readonly root = new THREE.Group();
+  readonly roads: RoadGraph;
+  readonly spawn: THREE.Vector3;
+  private readonly materials: (THREE.Material | null)[];
+  private readonly textures = new Map<string, Promise<THREE.Texture | null>>();
+  private readonly meshes = new Map<number, THREE.Group | 'loading'>();
+  private readonly colliders = new Map<number, RAPIER.Collider | 'loading'>();
+
+  private constructor(
+    private readonly base: string,
+    private readonly manifest: Manifest,
+    roads: RoadData,
+    private readonly world: RAPIER.World,
+  ) {
+    this.roads = new RoadGraph(roads);
+    this.spawn = new THREE.Vector3(...(manifest.spawn as [number, number, number]));
+    this.materials = manifest.materials.map(() => null);
+    this.root.name = 'map';
+  }
+
+  static async load(id: string, world: RAPIER.World): Promise<GameMap> {
+    const base = `/mods/maps/${id}`;
+    const [manifest, roads] = await Promise.all([
+      fetch(`${base}/manifest.json`).then((r) => r.json() as Promise<Manifest>),
+      fetch(`${base}/roads.json`).then((r) => r.json() as Promise<RoadData>),
+    ]);
+    return new GameMap(base, manifest, roads, world);
+  }
+
+  /** Load everything needed around a point right now (before the first frame). */
+  async prime(at: THREE.Vector3): Promise<void> {
+    const jobs: Promise<void>[] = [];
+    for (const c of this.manifest.cells) {
+      const d = this.distance(c, at);
+      if (c.collision && d < COLLISION_RADIUS) jobs.push(this.loadCollision(c));
+      if (c.render && d < RENDER_RADIUS * 0.5) jobs.push(this.loadCell(c));
+    }
+    await Promise.all(jobs);
+  }
+
+  /** Stream cells in and out. `camera` drives what's drawn; `solid` (player, rivals) what's collidable. */
+  update(camera: THREE.Vector3, solid: THREE.Vector3[]): void {
+    let budget = LOADS_PER_FRAME;
+    const wanted = this.manifest.cells
+      .map((c) => ({ c, d: this.distance(c, camera) }))
+      .sort((a, b) => a.d - b.d);
+    for (const { c, d } of wanted) {
+      if (c.render) {
+        const have = this.meshes.get(c.id);
+        if (!have && d < RENDER_RADIUS && budget > 0) {
+          budget--;
+          void this.loadCell(c);
+        } else if (have && have !== 'loading' && d > RENDER_RADIUS + 250) {
+          this.root.remove(have);
+          have.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+          this.meshes.delete(c.id);
+        }
+      }
+      if (c.collision) {
+        const near = Math.min(...solid.map((p) => this.distance(c, p)));
+        const col = this.colliders.get(c.id);
+        if (!col && near < COLLISION_RADIUS) void this.loadCollision(c);
+        else if (col && col !== 'loading' && near > COLLISION_RADIUS + 150) {
+          this.world.removeCollider(col, false);
+          this.colliders.delete(c.id);
+        }
+      }
+    }
+  }
+
+  get loadedCells(): number {
+    return [...this.meshes.values()].filter((m) => m !== 'loading').length;
+  }
+
+  private distance(c: CellInfo, p: THREE.Vector3): number {
+    const s = this.manifest.cellSize;
+    const dx = Math.max(c.x - p.x, 0, p.x - (c.x + s));
+    const dz = Math.max(c.z - p.z, 0, p.z - (c.z + s));
+    return Math.hypot(dx, dz);
+  }
+
+  private async loadCell(c: CellInfo): Promise<void> {
+    if (this.meshes.has(c.id)) return;
+    this.meshes.set(c.id, 'loading');
+    const buf = await fetch(`${this.base}/cells/${c.id}.bin`).then((r) => r.arrayBuffer());
+    const view = new DataView(buf);
+    const jsonLength = view.getUint32(0, true);
+    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
+      batches: { material: number; vertices: number; indices: number }[];
+    };
+    let offset = 4 + jsonLength;
+    offset += (4 - (offset % 4)) % 4;
+    const group = new THREE.Group();
+    for (const b of header.batches) {
+      const interleaved = new Float32Array(buf, offset, b.vertices * 8);
+      offset += b.vertices * 32;
+      const index = new Uint32Array(buf, offset, b.indices);
+      offset += b.indices * 4;
+      const ib = new THREE.InterleavedBuffer(interleaved, 8);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
+      geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(ib, 3, 3));
+      geo.setAttribute('uv', new THREE.InterleavedBufferAttribute(ib, 2, 6));
+      geo.setIndex(new THREE.BufferAttribute(index, 1));
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, await this.material(b.material));
+      mesh.matrixAutoUpdate = false;
+      const m = this.manifest.materials[b.material];
+      if (m.blend) mesh.renderOrder = 1;
+      group.add(mesh);
+    }
+    group.matrixAutoUpdate = false;
+    if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
+    this.meshes.set(c.id, group);
+    this.root.add(group);
+  }
+
+  private async loadCollision(c: CellInfo): Promise<void> {
+    if (this.colliders.has(c.id)) return;
+    this.colliders.set(c.id, 'loading');
+    const buf = await fetch(`${this.base}/col/${c.id}.bin`).then((r) => r.arrayBuffer());
+    const view = new DataView(buf);
+    const vertices = view.getUint32(0, true);
+    const indices = view.getUint32(4, true);
+    const pos = new Float32Array(buf, 8, vertices * 3);
+    const idx = new Uint32Array(buf, 8 + vertices * 12, indices);
+    const collider = this.world.createCollider(RAPIER.ColliderDesc.trimesh(pos, idx).setFriction(0.9).setCollisionGroups(STATIC_GROUPS));
+    this.colliders.set(c.id, collider);
+  }
+
+  private async material(i: number): Promise<THREE.Material> {
+    const existing = this.materials[i];
+    if (existing) return existing;
+    const m = this.manifest.materials[i];
+    const [map, normalMap] = await Promise.all([
+      m.diffuse ? this.texture(m.diffuse, true) : null,
+      m.normal ? this.texture(m.normal, false) : null,
+    ]);
+    if (this.materials[i]) return this.materials[i]!;
+    // GTA's emissive shaders are overlays: lit windows and signs drawn over the building, shaped by the
+    // texture's alpha. Add them as glow on top rather than as solid surfaces.
+    if (m.shader.startsWith('emissive') && map) {
+      const glow = new THREE.MeshBasicMaterial({
+        map,
+        color: new THREE.Color(1, 1, 1).multiplyScalar(m.shader.includes('night') ? 1.6 : 1.1),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+      });
+      this.materials[i] = glow;
+      return glow;
+    }
+    const spec = m.shader.includes('spec');
+    const mat = new THREE.MeshStandardMaterial({
+      map, normalMap,
+      color: map ? 0xffffff : 0x808080,
+      roughness: spec ? 0.55 : 0.85,
+      metalness: 0,
+      transparent: m.blend,
+      depthWrite: !m.blend,
+      alphaTest: m.mask ? 0.5 : 0,
+      side: m.mask ? THREE.DoubleSide : THREE.FrontSide,
+    });
+    if (normalMap) mat.normalScale.set(1, -1); // GTA normal maps are DirectX-style (green down)
+    if (m.emissive && map) {
+      mat.emissiveMap = map;
+      mat.emissive.set(0xffffff);
+      // "emissivenight" is signage and lit windows; plain "emissive" often covers whole facades
+      mat.emissiveIntensity = m.shader.includes('night') ? 1.4 : 0.12;
+    }
+    this.materials[i] = mat;
+    return mat;
+  }
+
+  private texture(name: string, color: boolean): Promise<THREE.Texture | null> {
+    let t = this.textures.get(name);
+    if (!t) {
+      t = fetch(`${this.base}/tex/${name}.gtx`)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((buf) => {
+          const t = buf ? decodeGtx(buf, color) : null;
+          if (t) t.name = name;
+          return t;
+        })
+        .catch(() => null);
+      this.textures.set(name, t);
+    }
+    return t;
+  }
+}
+
+/** GTX: "GTX1", u32 format (1/3/5 = DXT1/3/5, 0 = RGBA8), u16 w, u16 h, u16 mips, u16 pad, mip chain. */
+function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture {
+  const view = new DataView(buf);
+  const format = view.getUint32(4, true);
+  const width = view.getUint16(8, true);
+  const height = view.getUint16(10, true);
+  const mips = view.getUint16(12, true);
+  let texture: THREE.Texture;
+  if (format === 0) {
+    texture = new THREE.DataTexture(new Uint8Array(buf, 16, width * height * 4), width, height, THREE.RGBAFormat);
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+  } else {
+    const block = format === 1 ? 8 : 16;
+    const mipmaps: { data: Uint8Array; width: number; height: number }[] = [];
+    let offset = 16;
+    for (let l = 0; l < mips; l++) {
+      const w = Math.max(1, width >> l);
+      const h = Math.max(1, height >> l);
+      const size = Math.max(1, Math.ceil(w / 4)) * Math.max(1, Math.ceil(h / 4)) * block;
+      if (offset + size > buf.byteLength) break;
+      mipmaps.push({ data: new Uint8Array(buf, offset, size), width: w, height: h });
+      offset += size;
+    }
+    const fmt = format === 1 ? THREE.RGBA_S3TC_DXT1_Format : format === 3 ? THREE.RGBA_S3TC_DXT3_Format : THREE.RGBA_S3TC_DXT5_Format;
+    texture = new THREE.CompressedTexture(mipmaps as unknown as ImageData[], width, height, fmt);
+    texture.minFilter = mipmaps.length > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+  }
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 8;
+  texture.flipY = false;
+  if (color) texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// --- Roads ---
+
+interface RoadData {
+  nodes: [number, number, number][];
+  flags: number[];
+  links: [number, number, number, number][]; // a, b, lanes a→b, lanes b→a
+}
+
+export interface RoadLink {
+  a: number;
+  b: number;
+  lanesAB: number;
+  lanesBA: number;
+  length: number;
+}
+
+const LANE_WIDTH = 3.4;
+
+/** The mod's vehicle path network: nodes on road centerlines, links between them. */
+export class RoadGraph {
+  readonly nodes: THREE.Vector3[];
+  readonly links: RoadLink[];
+  readonly adjacent: { link: RoadLink; other: number }[][];
+  private readonly grid = new Map<string, number[]>(); // link indices bucketed by 50 m cell
+
+  constructor(data: RoadData) {
+    this.nodes = data.nodes.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    this.links = data.links.map(([a, b, lanesAB, lanesBA]) => ({
+      a, b, lanesAB, lanesBA, length: this.nodes[a].distanceTo(this.nodes[b]),
+    }));
+    this.adjacent = this.nodes.map(() => []);
+    this.links.forEach((l, i) => {
+      this.adjacent[l.a].push({ link: l, other: l.b });
+      this.adjacent[l.b].push({ link: l, other: l.a });
+      const pa = this.nodes[l.a];
+      const pb = this.nodes[l.b];
+      const steps = Math.ceil(l.length / 25);
+      for (let s = 0; s <= steps; s++) {
+        const x = pa.x + ((pb.x - pa.x) * s) / steps;
+        const z = pa.z + ((pb.z - pa.z) * s) / steps;
+        const key = `${Math.floor(x / 50)},${Math.floor(z / 50)}`;
+        let bucket = this.grid.get(key);
+        if (!bucket) this.grid.set(key, (bucket = []));
+        if (bucket[bucket.length - 1] !== i) bucket.push(i);
+      }
+    });
+  }
+
+  /** Nodes with three or more connections: intersections. */
+  junctions(): number[] {
+    return this.adjacent.map((a, i) => (a.length >= 3 ? i : -1)).filter((i) => i >= 0);
+  }
+
+  nearestNode(x: number, z: number): number {
+    const link = this.nearestLink(x, z);
+    if (!link) {
+      let best = 0;
+      let bestD = Infinity;
+      this.nodes.forEach((n, i) => {
+        const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      return best;
+    }
+    const da = (this.nodes[link.link.a].x - x) ** 2 + (this.nodes[link.link.a].z - z) ** 2;
+    const db = (this.nodes[link.link.b].x - x) ** 2 + (this.nodes[link.link.b].z - z) ** 2;
+    return da < db ? link.link.a : link.link.b;
+  }
+
+  /** Closest link to a point within ~50 m: how far along it (0..1) and signed side distance (+ = right of a→b). */
+  nearestLink(x: number, z: number): { link: RoadLink; t: number; side: number; distance: number } | null {
+    let best: { link: RoadLink; t: number; side: number; distance: number } | null = null;
+    const cx = Math.floor(x / 50);
+    const cz = Math.floor(z / 50);
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        for (const li of this.grid.get(`${cx + i},${cz + j}`) ?? []) {
+          const l = this.links[li];
+          const a = this.nodes[l.a];
+          const b = this.nodes[l.b];
+          const abx = b.x - a.x;
+          const abz = b.z - a.z;
+          const len2 = abx * abx + abz * abz || 1;
+          const t = THREE.MathUtils.clamp(((x - a.x) * abx + (z - a.z) * abz) / len2, 0, 1);
+          const px = a.x + abx * t;
+          const pz = a.z + abz * t;
+          const distance = Math.hypot(x - px, z - pz);
+          if (!best || distance < best.distance) {
+            // Right of travel a→b: heading +x has +z on its right, i.e. right = (-dz, dx)
+            const side = ((x - a.x) * -abz + (z - a.z) * abx) / Math.sqrt(len2);
+            best = { link: l, t, side, distance };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Signed distance from the road's centerline, positive on the correct (right-hand) side for travel
+   * direction (fx, fz). Null off the road network.
+   */
+  laneOffset(x: number, z: number, fx: number, fz: number): number | null {
+    const near = this.nearestLink(x, z);
+    if (!near || near.distance > (Math.max(near.link.lanesAB, near.link.lanesBA, 1) + 1) * LANE_WIDTH) return null;
+    const a = this.nodes[near.link.a];
+    const b = this.nodes[near.link.b];
+    const along = (b.x - a.x) * fx + (b.z - a.z) * fz;
+    if (Math.abs(along) < near.link.length * 0.6) return null; // crossing the road, not driving along it
+    // One-way roads have no oncoming side
+    if (near.link.lanesAB === 0 || near.link.lanesBA === 0) return Math.abs(near.side);
+    return along > 0 ? near.side : -near.side;
+  }
+
+  /** Shortest route between nodes (A*), as node indices; empty if unreachable. */
+  route(from: number, to: number, avoid?: number): number[] {
+    const open = new Map<number, number>([[from, 0]]);
+    const g = new Map<number, number>([[from, 0]]);
+    const came = new Map<number, number>();
+    const h = (n: number) => this.nodes[n].distanceTo(this.nodes[to]);
+    while (open.size > 0) {
+      let cur = -1;
+      let best = Infinity;
+      for (const [n, f] of open) if (f < best) { best = f; cur = n; }
+      if (cur === to) break;
+      open.delete(cur);
+      for (const { link, other } of this.adjacent[cur]) {
+        if (other === avoid && cur === from) continue;
+        const cost = g.get(cur)! + link.length;
+        if (cost < (g.get(other) ?? Infinity)) {
+          g.set(other, cost);
+          came.set(other, cur);
+          open.set(other, cost + h(other));
+        }
+      }
+    }
+    if (!came.has(to) && from !== to) return [];
+    const path = [to];
+    while (path[0] !== from) path.unshift(came.get(path[0])!);
+    return path;
+  }
+
+  /** Remaining driving distance from every node to `to` (Dijkstra), for race positions and GPS. */
+  distancesTo(to: number): Float32Array {
+    const dist = new Float32Array(this.nodes.length).fill(Infinity);
+    dist[to] = 0;
+    const open = new Set([to]);
+    while (open.size > 0) {
+      let cur = -1;
+      let best = Infinity;
+      for (const n of open) if (dist[n] < best) { best = dist[n]; cur = n; }
+      open.delete(cur);
+      for (const { link, other } of this.adjacent[cur]) {
+        const d = dist[cur] + link.length;
+        if (d < dist[other]) {
+          dist[other] = d;
+          open.add(other);
+        }
+      }
+    }
+    return dist;
+  }
+
+  /** Points along a node route, `offset` meters right of the centerline (lanes drive on the right). */
+  polyline(route: number[], offset = LANE_WIDTH / 2): THREE.Vector3[] {
+    const pts: THREE.Vector3[] = [];
+    for (let k = 0; k < route.length; k++) {
+      const p = this.nodes[route[k]].clone();
+      const prev = this.nodes[route[Math.max(0, k - 1)]];
+      const next = this.nodes[route[Math.min(route.length - 1, k + 1)]];
+      const dir = new THREE.Vector3().subVectors(next, prev).setY(0);
+      if (dir.lengthSq() > 1e-6) {
+        dir.normalize();
+        p.x += -dir.z * offset;
+        p.z += dir.x * offset;
+      }
+      pts.push(p);
+    }
+    return pts;
+  }
+
+  /** A pose on the nearest road, in a right-hand lane, facing the way closest to `heading`. */
+  roadPose(x: number, z: number, heading: number): { position: THREE.Vector3; yaw: number } {
+    const near = this.nearestLink(x, z);
+    if (!near) return { position: new THREE.Vector3(x, 2, z), yaw: -heading };
+    const a = this.nodes[near.link.a];
+    const b = this.nodes[near.link.b];
+    let dx = b.x - a.x;
+    let dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len;
+    dz /= len;
+    let forward = Math.cos(heading) * dx + Math.sin(heading) * dz >= 0;
+    if (forward && near.link.lanesAB === 0) forward = false;
+    if (!forward && near.link.lanesBA === 0) forward = true;
+    if (!forward) { dx = -dx; dz = -dz; }
+    const p = new THREE.Vector3().lerpVectors(a, b, near.t);
+    const oneWay = near.link.lanesAB === 0 || near.link.lanesBA === 0;
+    const offset = oneWay ? 0 : LANE_WIDTH * 0.5;
+    p.x += -dz * offset;
+    p.z += dx * offset;
+    p.y += 1;
+    return { position: p, yaw: -Math.atan2(dz, dx) };
+  }
+}
+
+/** Driving distances toward one destination node: race positions, the GPS and rival routes. */
+export class RaceField {
+  readonly dist: Float32Array;
+
+  constructor(readonly roads: RoadGraph, readonly dest: number) {
+    this.dist = roads.distancesTo(dest);
+  }
+
+  /** Remaining distance from a world position, via the nearer-to-home end of the road it's on. */
+  remaining(x: number, z: number): number {
+    const near = this.roads.nearestLink(x, z);
+    if (!near) {
+      const n = this.roads.nearestNode(x, z);
+      return this.dist[n] + Math.hypot(this.roads.nodes[n].x - x, this.roads.nodes[n].z - z);
+    }
+    const { link, t } = near;
+    return Math.min(this.dist[link.a] + t * link.length, this.dist[link.b] + (1 - t) * link.length) + near.distance;
+  }
+
+  /** The node to head for next from a world position. */
+  nextNode(x: number, z: number): number {
+    const near = this.roads.nearestLink(x, z);
+    if (!near) return this.roads.nearestNode(x, z);
+    const { link, t } = near;
+    return this.dist[link.a] + t * link.length <= this.dist[link.b] + (1 - t) * link.length ? link.a : link.b;
+  }
+
+  /** Shortest route from a node to the destination, as node indices. */
+  route(from: number): number[] {
+    const out = [from];
+    let cur = from;
+    while (this.dist[cur] > 0 && out.length < 5000) {
+      let next = -1;
+      let best = this.dist[cur];
+      for (const { other } of this.roads.adjacent[cur]) if (this.dist[other] < best) { best = this.dist[other]; next = other; }
+      if (next < 0) break;
+      out.push(next);
+      cur = next;
+    }
+    return out;
+  }
+}

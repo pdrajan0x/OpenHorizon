@@ -55,3 +55,79 @@ export class SkidMarks {
     this.last.fill(null);
   }
 }
+
+const MAX_SPARKS = 600;
+const SPARK_LIFE = 0.9;
+
+/** Crash sparks: short-lived additive points thrown out of an impact, one draw call. */
+export class Sparks {
+  private readonly points: THREE.Points;
+  private readonly pos = new Float32Array(MAX_SPARKS * 3);
+  private readonly vel = new Float32Array(MAX_SPARKS * 3);
+  private readonly life = new Float32Array(MAX_SPARKS);
+  private readonly color = new Float32Array(MAX_SPARKS * 3);
+  private next = 0;
+
+  constructor(scene: THREE.Scene) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.color, 3));
+    this.points = new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.16, vertexColors: true, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+
+  /** Throw `count` sparks from `at`, biased along `dir` (any length), with speed around `speed`. */
+  burst(at: THREE.Vector3, dir: THREE.Vector3, count: number, speed: number): void {
+    const d = dir.clone().normalize();
+    for (let n = 0; n < count; n++) {
+      const i = this.next;
+      this.next = (this.next + 1) % MAX_SPARKS;
+      const s = speed * (0.3 + Math.random() * 0.9);
+      this.pos.set([at.x, at.y, at.z], i * 3);
+      this.vel.set([
+        d.x * s + (Math.random() - 0.5) * speed,
+        Math.random() * speed * 0.6 + 1,
+        d.z * s + (Math.random() - 0.5) * speed,
+      ], i * 3);
+      this.life[i] = SPARK_LIFE * (0.5 + Math.random() * 0.5);
+    }
+  }
+
+  update(dt: number): void {
+    for (let i = 0; i < MAX_SPARKS; i++) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt;
+      const k = i * 3;
+      this.vel[k + 1] -= 9.81 * dt;
+      this.pos[k] += this.vel[k] * dt;
+      this.pos[k + 1] = Math.max(0.02, this.pos[k + 1] + this.vel[k + 1] * dt);
+      this.pos[k + 2] += this.vel[k + 2] * dt;
+      // Fade white-hot → orange → out; dead sparks go black, which additive blending hides
+      const t = Math.max(0, this.life[i] / SPARK_LIFE);
+      this.color[k] = t > 0 ? 1.6 * t + 0.2 : 0;
+      this.color[k + 1] = t > 0 ? 1.1 * t * t + 0.05 : 0;
+      this.color[k + 2] = t > 0 ? 0.5 * t * t * t : 0;
+    }
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
+  }
+}
+
+/** Soft round sprite: white center fading to transparent (smoke, glows). */
+export function radialTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d')!;
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}

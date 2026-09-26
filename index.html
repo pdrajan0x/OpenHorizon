@@ -10,20 +10,26 @@
     <canvas id="game"></canvas>
     <div id="hud">
       <div id="carname"></div>
+      <div id="event" class="hidden"></div>
+      <div id="banner"><div id="banner-main"></div><div id="banner-sub"></div></div>
+      <div id="feed"></div>
+      <div id="prompt" class="hidden"></div>
       <div id="drift"><div id="drift-label">DRIFT</div><div id="drift-score"></div></div>
       <canvas id="minimap" width="220" height="220"></canvas>
+      <div id="progress"></div>
       <div id="dash">
         <div id="speed"><span id="speed-value">0</span><span class="unit">km/h</span></div>
         <div id="boost"></div>
       </div>
       <div id="help">
         <b>W / ↑</b> throttle &nbsp; <b>S / ↓</b> brake · reverse &nbsp; <b>A D / ← →</b> steer<br />
-        <b>Space</b> handbrake — drift to fill boost &nbsp; <b>Shift</b> boost<br />
-        <b>1 2 3</b> switch car &nbsp; <b>C</b> camera &nbsp; <b>R</b> back to the road &nbsp; <b>F</b> FPS &nbsp; <b>H</b> hide help
+        <b>Space</b> handbrake &nbsp; <b>Shift</b> boost — earn it drifting, near misses, oncoming, air, takedowns<br />
+        Events wait at the glowing intersections: stop inside the ring and hold <b>W + S</b> &nbsp; <b>Backspace</b> quit event<br />
+        <b>1–9</b> switch car &nbsp; <b>C</b> camera &nbsp; <b>R</b> back to the road &nbsp; <b>F</b> FPS &nbsp; <b>H</b> hide help
       </div>
       <div id="fps"></div>
     </div>
-    <div id="loading">BUILDING THE CITY…</div>
+    <div id="loading">LOADING…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

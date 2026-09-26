@@ -1,5 +1,9 @@
-// Synthesized engine and tire audio. Browsers only allow audio after a user gesture,
-// so the graph is built on the first key or pointer press.
+// Car audio. The engine is a GTA V mod's granular engine (engineAudio.ts); a synthesized engine only
+// fills in until it has loaded. Tire squeal and crash thumps are still synthesized. Browsers only
+// allow audio after a user gesture, so the graph is built on the first key or pointer press.
+import { GranularEngine } from './engineAudio';
+
+const ENGINE_SET = 'ferrari';
 
 // Fake gearbox: upper speed (m/s) of each gear, so pitch climbs and drops like shifts
 const GEAR_TOPS = [0, 14, 24, 34, 45, 57, 80];
@@ -13,6 +17,9 @@ export class CarAudio {
   private engineGain?: GainNode;
   private tone?: BiquadFilterNode;
   private skidGain?: GainNode;
+  private master?: GainNode;
+  private noise?: AudioBuffer;
+  private engine: GranularEngine | null = null;
 
   constructor() {
     const start = () => {
@@ -32,7 +39,15 @@ export class CarAudio {
     while (gear < GEAR_TOPS.length - 1 && speed > GEAR_TOPS[gear]) gear++;
     const lo = GEAR_TOPS[gear - 1];
     const hi = GEAR_TOPS[gear];
-    const rpm = IDLE_RPM + RPM_RANGE * Math.min(1, Math.max(0, (speed - lo) / (hi - lo)));
+    const inGear = Math.min(1, Math.max(0, (speed - lo) / (hi - lo)));
+    if (this.engine) {
+      // Revs climb through each gear; boost pins them near the top
+      this.engine.update(0.12 + 0.85 * inGear + (boosting ? 0.05 : 0), Math.max(throttle, boosting ? 1 : 0));
+      this.engineGain!.gain.setTargetAtTime(0, now, 0.1);
+      this.skidGain!.gain.setTargetAtTime(skid * 0.35, now, 0.05);
+      return;
+    }
+    const rpm = IDLE_RPM + RPM_RANGE * inGear;
     const firing = (rpm / 60) * 2; // four-cylinder firing frequency
 
     this.low!.frequency.setTargetAtTime(firing * 0.5, now, 0.05);
@@ -42,12 +57,59 @@ export class CarAudio {
     this.skidGain!.gain.setTargetAtTime(skid * 0.35, now, 0.05);
   }
 
+  /** A crunch: filtered noise with a low thump; `strength` 0..1. */
+  crash(strength: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noise) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(3500, now);
+    filter.frequency.exponentialRampToValueAtTime(300, now + 0.6);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.9 * strength + 0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+    src.connect(filter).connect(gain).connect(this.master);
+    src.start(now, Math.random());
+    src.stop(now + 0.9);
+
+    const thump = ctx.createOscillator();
+    thump.frequency.setValueAtTime(90, now);
+    thump.frequency.exponentialRampToValueAtTime(35, now + 0.3);
+    const tg = ctx.createGain();
+    tg.gain.setValueAtTime(0.8 * strength, now);
+    tg.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    thump.connect(tg).connect(this.master);
+    thump.start(now);
+    thump.stop(now + 0.4);
+  }
+
+  /** Countdown and UI blip. */
+  beep(frequency: number, seconds = 0.15): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = frequency;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + seconds);
+    osc.connect(gain).connect(this.master);
+    osc.start(now);
+    osc.stop(now + seconds + 0.02);
+  }
+
   private start(): void {
     const ctx = new AudioContext();
     this.ctx = ctx;
     const master = ctx.createGain();
     master.gain.value = 0.35;
     master.connect(ctx.destination);
+    this.master = master;
+    GranularEngine.load(ctx, master, ENGINE_SET).then((e) => (this.engine = e)).catch(() => {});
 
     this.tone = ctx.createBiquadFilter();
     this.tone.type = 'lowpass';
@@ -71,6 +133,7 @@ export class CarAudio {
     const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = noise.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    this.noise = noise;
     const source = ctx.createBufferSource();
     source.buffer = noise;
     source.loop = true;

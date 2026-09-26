@@ -1,3 +1,11 @@
 node_modules/
 dist/
 test-results/
+# Third-party tool sources and downloaded mod files (local use only, fetched by scripts)
+tools/vendor/
+tools/*/bin/
+tools/*/obj/
+.mods/
+public/mods/
+dist-play/
+.build/
