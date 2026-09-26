@@ -8,9 +8,36 @@ import * as THREE from 'three';
 const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
 const COLLISION_RADIUS = 600; // m of collision around the player and rivals (traffic lives within ~300 m)
 const LOADS_PER_FRAME = 3;
-// Small things vanish into the fog early: a mesh is drawn out to this many times its size
+const MAX_FETCHES = 8; // concurrent downloads: priming a big city all at once exhausts the browser's request slots
+// Small things vanish into the fog early: a mesh is drawn out to this many times its size.
+// Only detail (small entities, tagged by the converter) is culled this way; building structure stays
+// until its cell streams out. Maps converted before the tags existed are culled far more gently.
 const DRAW_DISTANCE_PER_METER = 18;
 const MIN_DRAW_DISTANCE = 120;
+const UNTAGGED_DRAW_DISTANCE_PER_METER = 40;
+const UNTAGGED_MIN_DRAW_DISTANCE = 300;
+let fetching = 0;
+const queued: (() => void)[] = [];
+/** fetch() a few at a time, retried on network errors; the body, or null for an HTTP error. */
+async function download(url: string): Promise<ArrayBuffer | null> {
+  if (fetching >= MAX_FETCHES) await new Promise<void>((go) => queued.push(go));
+  fetching++;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const r = await fetch(url);
+        return r.ok ? await r.arrayBuffer() : null;
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        await new Promise((go) => setTimeout(go, 250 * (attempt + 1)));
+      }
+    }
+  } finally {
+    fetching--;
+    queued.shift()?.();
+  }
+}
+
 /** Collision groups: the city is in STATIC_GROUP; lane-following traffic skips it (see traffic.ts). */
 export const STATIC_GROUP = 0x0001;
 export const CAR_GROUP = 0x0002;
@@ -192,8 +219,12 @@ export class GameMap {
       if (group === 'loading') continue;
       for (const o of group.children) {
         const mesh = o as THREE.Mesh;
+        const detail = mesh.userData.detail as boolean | null;
+        if (detail === false) continue; // structure
         const sphere = mesh.geometry.boundingSphere!;
-        const reach = Math.max(MIN_DRAW_DISTANCE, sphere.radius * DRAW_DISTANCE_PER_METER) + sphere.radius;
+        const reach = detail
+          ? Math.max(MIN_DRAW_DISTANCE, sphere.radius * DRAW_DISTANCE_PER_METER) + sphere.radius
+          : Math.max(UNTAGGED_MIN_DRAW_DISTANCE, sphere.radius * UNTAGGED_DRAW_DISTANCE_PER_METER) + sphere.radius;
         mesh.visible = sphere.center.distanceToSquared(camera) < reach * reach;
       }
     }
@@ -214,22 +245,31 @@ export class GameMap {
   private async loadCell(c: CellInfo): Promise<void> {
     if (this.meshes.has(c.id)) return;
     this.meshes.set(c.id, 'loading');
-    const buf = await fetch(`${this.base}/cells/${c.id}.bin`).then((r) => r.arrayBuffer());
+    const buf = await download(`${this.base}/cells/${c.id}.bin`);
+    if (!buf) return;
     const view = new DataView(buf);
     const jsonLength = view.getUint32(0, true);
     const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
-      batches: { material: number; vertices: number; indices: number }[];
+      batches: { material: number; vertices: number; indices: number; colors?: boolean; detail?: boolean }[];
     };
     let offset = 4 + jsonLength;
     offset += (4 - (offset % 4)) % 4;
     const group = new THREE.Group();
     for (const b of header.batches) {
-      const interleaved = new Float32Array(buf, offset, b.vertices * 8);
-      offset += b.vertices * 32;
+      // 8 floats per vertex, plus GTA's baked vertex shading (RGBA8) when the batch has it
+      const stride = b.colors ? 9 : 8;
+      const interleaved = new Float32Array(buf, offset, b.vertices * stride);
+      const geo = new THREE.BufferGeometry();
+      if (b.colors) {
+        const bytes = new Uint8Array(buf, offset, b.vertices * stride * 4);
+        const shade = new Uint8Array(b.vertices * 4);
+        for (let v = 0; v < b.vertices; v++) shade.set(bytes.subarray(v * 36 + 32, v * 36 + 36), v * 4);
+        geo.setAttribute('shade', new THREE.BufferAttribute(shade, 4, true));
+      }
+      offset += b.vertices * stride * 4;
       const index = new Uint32Array(buf, offset, b.indices);
       offset += b.indices * 4;
-      const ib = new THREE.InterleavedBuffer(interleaved, 8);
-      const geo = new THREE.BufferGeometry();
+      const ib = new THREE.InterleavedBuffer(interleaved, stride);
       geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
       geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(ib, 3, 3));
       geo.setAttribute('uv', new THREE.InterleavedBufferAttribute(ib, 2, 6));
@@ -237,6 +277,7 @@ export class GameMap {
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, await this.material(b.material));
       mesh.matrixAutoUpdate = false;
+      mesh.userData.detail = b.detail ?? null; // null: an old map without structure/detail tags
       const m = this.manifest.materials[b.material];
       if (m.blend) mesh.renderOrder = 1;
       group.add(mesh);
@@ -250,7 +291,8 @@ export class GameMap {
   private async loadCollision(c: CellInfo): Promise<void> {
     if (this.colliders.has(c.id)) return;
     this.colliders.set(c.id, 'loading');
-    const buf = await fetch(`${this.base}/col/${c.id}.bin`).then((r) => r.arrayBuffer());
+    const buf = await download(`${this.base}/col/${c.id}.bin`);
+    if (!buf) return;
     const view = new DataView(buf);
     const vertices = view.getUint32(0, true);
     const indices = view.getUint32(4, true);
@@ -335,8 +377,7 @@ export class GameMap {
   private texture(name: string, color: boolean): Promise<THREE.Texture | null> {
     let t = this.textures.get(name);
     if (!t) {
-      t = fetch(`${this.base}/tex/${name}.gtx`)
-        .then((r) => (r.ok ? r.arrayBuffer() : null))
+      t = download(`${this.base}/tex/${name}.gtx`)
         .then((buf) => {
           const t = buf ? decodeGtx(buf, color) : null;
           if (t) t.name = name;

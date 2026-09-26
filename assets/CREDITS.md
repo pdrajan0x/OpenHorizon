@@ -28,6 +28,24 @@ rights holders).
 - [2012 Ford F150 SVT Raptor R [Add-On / Replace]](https://www.gta5-mods.com/vehicles/2012-ford-f150-svt-raptor) by [GOC]peng00820
 - [Mercedes Sprinter 211 CDI [Add-On / Replace | Template]](https://www.gta5-mods.com/vehicles/mercedes-sprinter-211-cdi-addon-replace-template) by ArmaniAdnr (base model by Ryuk)
 
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/toyota-corolla-2010-xei) by CristopherIgor
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2020-bmw-330i-g20-addon-gx_lover) by Gx_Lover
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2017-mercedes-benz-e300-4matic-w213-add-on-replace-ahmeda1999) by ahmeda1999
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/mercedes-benz-c-class-w205-2014-unlocked) by GloriusModding
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/volkswagen-golf-7-5r-2018-add-on) by VRSTNR MODDING TEAM
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/non-els-2020-ford-explorer) by NorthernScot
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/chevrolet-tahoe-add-on-replace) by AlexHIT
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/non-els-2017-chevrolet-silverado-4x4) by Discarded2003
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2023-nissan-altima-sr-vc-turbo-replace-add-on) by jrem7315 &amp; Lazlow
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/hyundai-sonata-limited-2020-add-on-replace-analog-digital-dials-1-3) by Lyn&#39;s
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/2022-kia-k5-gt-1-0-replace-add-on) by jrem7315 &amp; Lazlow
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/london-levc-tx-taxi-replace-template) by NotchApple
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/man-lions-city-a37) by bozdemirt
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/ford-transit-extras-unlocked) by AuthorSaulAlan
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/toyota-comfort-hong-kong-taxi) by gudi17
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/keitora-custom-pack-add-on-tuning-template) by Silentm503
+- [Welcome to GTA5-Mods.com](https://www.gta5-mods.com/vehicles/suzuki-swift-2021-add-on) by Markina991
+
 ## Maps
 
 - [Tokyo Shinjuku City Map [Add-on]](https://www.gta5-mods.com/maps/tokyo-shinjuku-city-map-add-on) by Mrtank
@@ -53,6 +71,14 @@ rights holders).
 - [Realistic Tire Skid Sound Mod](https://www.gta5-mods.com/misc/realistic-tire-skid-sound-mod) by StraightGlitcheZ
 - [Better Crash Sounds (BeamNG.drive)](https://www.beamng.com/resources/better-crash-sounds-completed.2554/) by Sugarking22795
 - [Alpha - Crash Sound Mod (BeamNG.drive)](https://www.beamng.com/resources/crash-sound-mod.2984/) by DriftTuner
+
+## Vegetation, buildings and props
+
+- [Million Trees](https://www.gta5-mods.com/maps/million-trees) by (gta5-mods, Infinite Question Discord)
+- [Poly Haven trees (island_tree_01-03, jacaranda, pine, fir, tree_small_02)](https://polyhaven.com/models/nature) by Poly Haven
+- [Poly Haven shrubs + planter boxes](https://polyhaven.com/models) by Poly Haven
+- [Poly Haven Hidden Alley facades](https://polyhaven.com/models) by Poly Haven
+- [Poly Haven street furniture](https://polyhaven.com/models) by Poly Haven
 
 ## Coast, sky and bridges
 

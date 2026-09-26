@@ -887,5 +887,375 @@
     "format": "gta5-dlc-rpf",
     "notes": "Photogrammetry (Google 3D tiles) extraction of the Golden Gate Bridge + surroundings, ~2.7 km real sea suspension bridge; .mods/bridge-golden-gate-scan/x/gm_sfgg/dlc.rpf. Scan mesh, baked lighting, no clean road surface - may need collision proxy.",
     "downloaded": true
+  },
+  {
+    "id": "traffic-corolla",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Toyota Corolla XEi 2010 sedan",
+    "author": "CristopherIgor",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/toyota-corolla-2010-xei",
+    "fileUrl": "https://files.gta5-mods.com/uploads/toyota-corolla-2010-xei/4d2ef2-toyota-corolla-2010-xei.zip",
+    "archiveBytes": 20187727,
+    "format": "mixed",
+    "files": [
+      "stanier.yft",
+      "stanier_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. replaces stanier. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-bmw-330i",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "BMW 330i (G20) 2020",
+    "author": "Gx_Lover",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2020-bmw-330i-g20-addon-gx_lover",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2020-bmw-330i-g20-addon-gx_lover/bc8491-2020%20G20.rar",
+    "archiveBytes": 33819706,
+    "format": "dlc-rpf",
+    "files": [
+      "x/2020 G20/gxg20/dlc.rpf"
+    ],
+    "hasLoose": false,
+    "notes": "5.0/5 rating. add-on dlc.rpf gxg20. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-mercedes-e300",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Mercedes-Benz E300 4Matic (W213) 2017",
+    "author": "ahmeda1999",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2017-mercedes-benz-e300-4matic-w213-add-on-replace-ahmeda1999",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2017-mercedes-benz-e300-4matic-w213-add-on-replace-ahmeda1999/6a0d15-2017%20Mercedes-Benz%20E300%20Exclusive%204matic%20%28W213%29%20v2.0%20by%20ahmeda1999.rar",
+    "archiveBytes": 76106891,
+    "format": "mixed",
+    "files": [
+      "schafter2.yft",
+      "schafter2_hi.yft",
+      "x/2017 Mercedes-Benz E300 Exclusive 4matic (W213) v2.0 by ahmeda1999/Add-on/e300w213/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.97/5 rating. add-on/replace schafter2; readme mentions LODs. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-mercedes-c",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Mercedes-Benz C-Class (W205) 2014",
+    "author": "GloriusModding",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/mercedes-benz-c-class-w205-2014-unlocked",
+    "fileUrl": "https://files.gta5-mods.com/uploads/mercedes-benz-c-class-w205-2014-unlocked/13ba75-Mercedes-Benz%20C-Class%20W205%202014%20%5BUnlocked%5D%20update1.zip",
+    "archiveBytes": 43832768,
+    "format": "mixed",
+    "files": [
+      "schwarzer.yft",
+      "schwarzer_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "4.71/5 rating. replace schwarzer. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-golf",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Volkswagen Golf 7.5 R 2018",
+    "author": "VRSTNR MODDING TEAM",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/volkswagen-golf-7-5r-2018-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/volkswagen-golf-7-5r-2018-add-on/539c90-VW%20Golf%207.5R.rar",
+    "archiveBytes": 46301759,
+    "format": "dlc-rpf",
+    "files": [
+      "x/golf75r/dlc.rpf"
+    ],
+    "hasLoose": false,
+    "notes": "4.71/5 rating. add-on dlc.rpf golf75r. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-explorer",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Ford Explorer 2020 (civilian)",
+    "author": "NorthernScot",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/non-els-2020-ford-explorer",
+    "fileUrl": "https://files.gta5-mods.com/uploads/non-els-2020-ford-explorer/27f010-explorer.rar",
+    "archiveBytes": 18839882,
+    "format": "mixed",
+    "files": [
+      "Explorer.yft",
+      "Explorer_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. loose Explorer.yft. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-tahoe",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Chevrolet Tahoe 2015",
+    "author": "AlexHIT",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/chevrolet-tahoe-add-on-replace",
+    "fileUrl": "https://files.gta5-mods.com/uploads/chevrolet-tahoe-add-on-replace/bf8d78-Chevrolet%20Tahoe%20%5BAdd-On%20%20Replace%5D%20v1.0%20by%20Shady311%20%26%20AlexeyHIT.zip",
+    "archiveBytes": 37296080,
+    "format": "mixed",
+    "files": [
+      "rancherxl.yft",
+      "rancherxl_hi.yft",
+      "x/Chevrolet Tahoe [Add-On  Replace] v1.0 by Shady311 & AlexeyHIT/Add-On/x64/dlcpacks/tahoe/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.82/5 rating. add-on/replace rancherxl; readme mentions LODs. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-silverado",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Chevrolet Silverado 1500 4x4 2017 pickup",
+    "author": "Discarded2003",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/non-els-2017-chevrolet-silverado-4x4",
+    "fileUrl": "https://files.gta5-mods.com/uploads/non-els-2017-chevrolet-silverado-4x4/d91642-2017%20Chevrolet%20Silverado%204x4.rar",
+    "archiveBytes": 48280345,
+    "format": "mixed",
+    "files": [
+      "silv.yft",
+      "silv_hi.yft",
+      "x/2017 Chevrolet Silverado 4x4/[ADDON]/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.83/5 rating. silv. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-altima",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Nissan Altima SR VC-Turbo 2023",
+    "author": "jrem7315 &amp; Lazlow",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2023-nissan-altima-sr-vc-turbo-replace-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2023-nissan-altima-sr-vc-turbo-replace-add-on/32f0d9-2013%20Nissan%20Altima%202.0%20SR.rar",
+    "archiveBytes": 17344930,
+    "format": "mixed",
+    "files": [
+      "schafter2.yft",
+      "schafter2_hi.yft",
+      "x/2013 Nissan Altima 2.0 SR/add-on/23altimavctsr/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. replace schafter2 / add-on. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-sonata",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Hyundai Sonata Limited 2020",
+    "author": "Lyn&#39;s",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/hyundai-sonata-limited-2020-add-on-replace-analog-digital-dials-1-3",
+    "fileUrl": "https://files.gta5-mods.com/uploads/hyundai-sonata-limited-2020-add-on-replace-analog-digital-dials-1-3/2df2cf-HS20.rar",
+    "archiveBytes": 63748269,
+    "format": "mixed",
+    "files": [
+      "oracle2.yft",
+      "oracle2_hi.yft",
+      "x/Hyundai Sonata Limited 1.6T  V1.3 (By Lyn's Motorsport)/ADD-ON/sonata20/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.75/5 rating. replace oracle2 / add-on. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-kia-k5",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Kia K5 GT 2022",
+    "author": "jrem7315 &amp; Lazlow",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2022-kia-k5-gt-1-0-replace-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2022-kia-k5-gt-1-0-replace-add-on/5045de-2022%20Kia%20K5%20GT.rar",
+    "archiveBytes": 19179833,
+    "format": "mixed",
+    "files": [
+      "stanier.yft",
+      "stanier_hi.yft",
+      "x/2022 Kia K5 GT/Add-On/2022kiak5gt/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.7/5 rating. replace stanier / add-on; meta mentions LODs. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-london-cab",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "LEVC TX London black cab",
+    "author": "NotchApple",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/london-levc-tx-taxi-replace-template",
+    "fileUrl": "https://files.gta5-mods.com/uploads/london-levc-tx-taxi-replace-template/f02d76-Levc%20TX%20Electric%20Taxi.zip",
+    "archiveBytes": 9210865,
+    "format": "mixed",
+    "files": [
+      "dilettante.yft",
+      "dilettante_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. replace dilettante. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-bus-man",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "MAN Lion's City A37 city bus",
+    "author": "bozdemirt",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/man-lions-city-a37",
+    "fileUrl": "https://files.gta5-mods.com/uploads/man-lions-city-a37/888de7-Man_Lions_City_A37_V1.2.1.rar",
+    "archiveBytes": 17813358,
+    "format": "mixed",
+    "files": [
+      "bus.yft",
+      "bus_hi.yft",
+      "x/Man Lions City A37 V1.2.1/addon/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "4.61/5 rating. replace bus. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-transit",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Ford Transit van",
+    "author": "AuthorSaulAlan",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/ford-transit-extras-unlocked",
+    "fileUrl": "https://files.gta5-mods.com/uploads/ford-transit-extras-unlocked/29b5d5-Ford%20Transit%20V1.zip",
+    "archiveBytes": 8191818,
+    "format": "mixed",
+    "files": [
+      "moonbeam2.yft",
+      "moonbeam2_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. replace moonbeam2; delivery van. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-crown-comfort-taxi",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Toyota Crown Comfort (Hong Kong taxi)",
+    "author": "gudi17",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/toyota-comfort-hong-kong-taxi",
+    "fileUrl": "https://files.gta5-mods.com/uploads/toyota-comfort-hong-kong-taxi/666402-toyotaJPN.rar",
+    "archiveBytes": 16461116,
+    "format": "mixed",
+    "files": [
+      "taxi.yft",
+      "taxi_hi.yft"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. replace taxi; JPN-style Crown Comfort. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-kei-truck",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Japanese kei truck (keitora) custom pack",
+    "author": "Silentm503",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/keitora-custom-pack-add-on-tuning-template",
+    "fileUrl": "https://files.gta5-mods.com/uploads/keitora-custom-pack-add-on-tuning-template/31f2da-Keitora%20Custom%20Pack%20Public-SMC.zip",
+    "archiveBytes": 61850856,
+    "format": "mixed",
+    "files": [
+      "keitorac_livery14.yft",
+      "x/Keitora Custom Pack Public-SMC/SinglePlayer/keitora-sm/dlc.rpf"
+    ],
+    "hasLoose": true,
+    "notes": "5.0/5 rating. add-on dlc.rpf. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "traffic-swift",
+    "category": "traffic",
+    "title": "Welcome to GTA5-Mods.com",
+    "brandModel": "Suzuki Swift 2021 (compact)",
+    "author": "Markina991",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/suzuki-swift-2021-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/suzuki-swift-2021-add-on/99e9a2-Swift2021.rar",
+    "archiveBytes": 32451317,
+    "format": "dlc-rpf",
+    "files": [
+      "x/swift2021/dlc.rpf"
+    ],
+    "hasLoose": false,
+    "notes": "4.71/5 rating. add-on dlc.rpf swift2021. LODs not verified (GTA yft embeds L0-L2 internally; check on conversion).",
+    "downloaded": true
+  },
+  {
+    "id": "veg-million-trees",
+    "category": "vegetation",
+    "title": "Million Trees",
+    "author": "(gta5-mods, Infinite Question Discord)",
+    "pageUrl": "https://www.gta5-mods.com/maps/million-trees",
+    "fileUrl": "https://drive.google.com/file/d/1y3pNTl-UldxyYdNQTQ2NIjquu46i3w-_/view",
+    "archiveBytes": 1713237836,
+    "format": "rar -> dlc.rpf x4 + oiv",
+    "notes": "MillionVegi/dlc.rpf (354MB) holds ~50 vanilla-archetype-named tree replacements (prop_tree_birch_*, prop_tree_cedar_*, prop_rus_olive*, prop_rio_del_01 with _l2/_l3 LODs) as ydr+ytd -> converter can map directly. MillionTrees/dlc.rpf = ytyp/ymaps (placement, not needed). MillionBlanks (1GB) blanks vanilla veg - ignore. Palms reportedly unedited. Freeware mod, no explicit license; personal use.",
+    "downloaded": true
+  },
+  {
+    "id": "veg-polyhaven-trees",
+    "category": "vegetation",
+    "title": "Poly Haven trees (island_tree_01-03, jacaranda, pine, fir, tree_small_02)",
+    "author": "Poly Haven",
+    "pageUrl": "https://polyhaven.com/models/nature",
+    "fileUrl": "https://api.polyhaven.com/files/<id> (gltf 2k)",
+    "archiveBytes": 2073900034,
+    "format": "gltf+bin+2k jpg/png per id in x/<id>/",
+    "notes": "CC0. Photoscanned-quality, alpha leaves, 2k textures. island_tree_* broadleaf (Chicago/Tokyo stand-in), jacaranda (flowering, Tokyo/Miami). NO LODs; pine_tree_01 (937MB) and fir_tree_01 (487MB) are extremely dense - need decimation/impostors. No palms on Poly Haven.",
+    "downloaded": true
+  },
+  {
+    "id": "veg-polyhaven-shrubs",
+    "category": "vegetation",
+    "title": "Poly Haven shrubs + planter boxes",
+    "author": "Poly Haven",
+    "pageUrl": "https://polyhaven.com/models",
+    "fileUrl": "https://api.polyhaven.com/files/<id> (gltf 2k)",
+    "archiveBytes": 58349273,
+    "format": "gltf 2k",
+    "notes": "CC0. shrub_01-04, shrub_sorrel_01, wild_rooibos_bush (hedge/bush fill), planter_box_01-03 (urban planters). 2k textures, alpha-tested leaves.",
+    "downloaded": true
+  },
+  {
+    "id": "building-polyhaven-facades",
+    "category": "building",
+    "title": "Poly Haven Hidden Alley facades",
+    "author": "Poly Haven",
+    "pageUrl": "https://polyhaven.com/models",
+    "fileUrl": "https://api.polyhaven.com/files/<id> (gltf 2k)",
+    "archiveBytes": 114478612,
+    "format": "gltf 2k (PBR: diffuse/normal/roughness/metal)",
+    "notes": "CC0. modular_urban_apartments_facade, modular_factory_facade (modular kits for ground-floor/street-level detail), rollershutter_door, rollershutter_window_01, modular_metal_gutter. Not whole buildings. No suitable GTA V HD building-model replacement packs found (gta5-mods offerings are texture-only e.g. Project Textures Revamped, or single low-quality Sketchfab ports - rejected).",
+    "downloaded": true
+  },
+  {
+    "id": "props-polyhaven-street",
+    "category": "prop",
+    "title": "Poly Haven street furniture",
+    "author": "Poly Haven",
+    "pageUrl": "https://polyhaven.com/models",
+    "fileUrl": "https://api.polyhaven.com/files/<id> (gltf 2k)",
+    "archiveBytes": 70741784,
+    "format": "gltf 2k PBR",
+    "notes": "CC0. fire_hydrant, concrete_road_barrier (+_02, Jersey barriers), modular_chainlink_fence, painted_wooden_bench, street_lamp_01/02. No bins/bus stops available on Poly Haven.",
+    "downloaded": true
   }
 ]
