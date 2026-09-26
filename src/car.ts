@@ -230,6 +230,12 @@ export class Car {
     return Math.hypot(v.x - this.before.x, v.z - this.before.z);
   }
 
+  /** The horizontal velocity change over the last world.step() as a vector (see impact()). */
+  impactVector(out: THREE.Vector3): THREE.Vector3 {
+    const v = this.body.linvel();
+    return out.set(v.x - this.before.x, 0, v.z - this.before.z);
+  }
+
   /**
    * Dent the body after a hit: call after world.step() with this step's impact(). The contact
    * manifolds give the point; failing that, the direction of the velocity change does.

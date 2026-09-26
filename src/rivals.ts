@@ -13,15 +13,26 @@ import { RIVAL_GARAGE, type CarTuning } from './tuning';
 const LOOK_BASE = 7; // m
 const LOOK_PER_SPEED = 0.45; // extra look-ahead per m/s
 const STEER_GAIN = 2.4;
-const CORNER_SPEED = 16; // m/s through a right-angle turn
 const PLAN_DECEL = 10; // m/s² the AI assumes when braking for a corner
 const CORNER_SCAN = 160; // m ahead to look for corners
+// Corner speeds come from the path's curvature, not its individual bends: the map's road graph draws
+// a curve as many small kinks. Sampled every SAMPLE m, turn measured over CURVE_WINDOW m either side.
+const SAMPLE = 4;
+const CURVE_WINDOW = 10;
+const LATERAL_GRIP = 16; // m/s² of cornering the AI plans for
+const FAST = 60; // m/s: treat as straight
 const WRECK_DV = 10;
 const WRECK_MIN_SPEED = 8;
 const WRECK_SECONDS = 2.5;
 const STUCK_SECONDS = 2.5;
 const FLIP_UP = 0.3;
 const CONTACT_MEMORY = 1.5; // s a shove from the player still counts toward a takedown
+// Burnout-style shoves: a hard hit from the player is a takedown on the spot; a firm one knocks the
+// rival out of control (it spins off and usually finds a wall or traffic); a tap does nothing
+const SHUNT_DV = 4.5; // m/s the player's hit changes the rival's velocity by
+const SPIN_DV = 2.5;
+const SPIN_SECONDS = 1.3;
+const SPIN_YAW = 0.9; // rad/s of yaw kick per m/s of hit
 const AVOID_LOOK = 38;
 const AVOID_CORRIDOR = 2.2;
 const SHIFT_MIN = -6; // lateral room left of the route line (it runs half a lane right of the centerline)
@@ -44,6 +55,7 @@ export class Rival {
   readonly controls: Controls = { throttle: 0, brake: 0, steer: 0, handbrake: false, boost: false };
   path: THREE.Vector3[] = [];
   private cum: number[] = [];
+  private limits: number[] = []; // corner speed every SAMPLE m along the path
   s = 0; // progress along the path, m
   finished = false;
   wrecked = false;
@@ -58,6 +70,7 @@ export class Rival {
   private shiftTarget = 0;
   private clearFor = 0;
   private speedBefore = 0;
+  private spinning = 0; // s left out of control after a shove
   private readonly tmp = new THREE.Vector3();
   private readonly tangent = new THREE.Vector3();
 
@@ -71,6 +84,20 @@ export class Rival {
     for (let i = 1; i < points.length; i++) this.cum.push(this.cum[i - 1] + points[i].distanceTo(points[i - 1]));
     this.s = s;
     this.shift = this.shiftTarget = 0;
+    this.limits = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    for (let d = 0; d <= this.pathLength; d += SAMPLE) {
+      this.pointAt(d - CURVE_WINDOW, a);
+      this.pointAt(d, b);
+      this.pointAt(d + CURVE_WINDOW, c);
+      const h1 = Math.atan2(b.z - a.z, b.x - a.x);
+      const h2 = Math.atan2(c.z - b.z, c.x - b.x);
+      const turn = Math.abs(Math.atan2(Math.sin(h2 - h1), Math.cos(h2 - h1)));
+      const curvature = turn / CURVE_WINDOW;
+      this.limits.push(Math.min(FAST, Math.sqrt(LATERAL_GRIP / Math.max(curvature, 1e-4))));
+    }
   }
 
   get pathLength(): number {
@@ -84,6 +111,7 @@ export class Rival {
     const heading = Math.atan2(this.tangent.z, this.tangent.x);
     this.car.reset(new THREE.Vector3(p.x, p.y + 0.5, p.z), -heading);
     this.car.damage.repair();
+    this.spinning = 0;
     this.car.body.setLinvel({ x: this.tangent.x * speed, y: 0, z: this.tangent.z * speed }, true);
     this.wrecked = false;
     this.stuck = 0;
@@ -105,6 +133,14 @@ export class Rival {
   drive(dt: number, others: Agent[]): void {
     const c = this.controls;
     const car = this.car;
+    if (this.spinning > 0) {
+      this.spinning -= dt;
+      c.throttle = 0;
+      c.steer = 0;
+      c.brake = 0;
+      c.boost = false;
+      return;
+    }
     if (this.wrecked || this.finished) {
       c.throttle = 0;
       c.steer = 0;
@@ -168,19 +204,11 @@ export class Rival {
     // Speed: fastest speed from which we can still brake down to each upcoming corner's speed
     let allowed = Infinity;
     let straight = Infinity;
-    const { path, cum } = this;
-    for (let k = 1; k < path.length - 1; k++) {
-      const dist = cum[k] - this.s;
-      if (dist < -2) continue;
+    for (let k = Math.max(0, Math.floor(this.s / SAMPLE)); k < this.limits.length; k++) {
+      const dist = k * SAMPLE - this.s;
       if (dist > CORNER_SCAN) break;
-      const a = this.tmp.subVectors(path[k], path[k - 1]).normalize();
-      const bx = path[k + 1].x - path[k].x;
-      const bz = path[k + 1].z - path[k].z;
-      const bl = Math.hypot(bx, bz) || 1;
-      const turn = Math.acos(THREE.MathUtils.clamp((a.x * bx + a.z * bz) / bl, -1, 1));
-      if (turn < 0.2) continue;
-      straight = Math.min(straight, Math.max(0, dist));
-      const vc = CORNER_SPEED * (1 + 1.5 * (1 - turn / (Math.PI / 2)));
+      const vc = this.limits[k];
+      if (vc < 30) straight = Math.min(straight, Math.max(0, dist));
       allowed = Math.min(allowed, Math.sqrt(vc * vc + 2 * PLAN_DECEL * Math.max(0, dist - 4)));
     }
     allowed = Math.min(allowed, this.maxSpeed);
@@ -204,14 +232,26 @@ export class Rival {
    */
   afterStep(time: number, player: Car, world: RAPIER.World): 'wrecked' | 'respawn' | null {
     const car = this.car;
+    let touched = false;
     world.contactPair(player.collider, car.collider, (manifold) => {
-      if (manifold.numContacts() > 0) this.lastContact = time;
+      if (manifold.numContacts() > 0) touched = true;
     });
+    if (touched) this.lastContact = time;
     if (this.wrecked) return time - this.wreckedAt > WRECK_SECONDS ? 'respawn' : null;
     if (this.finished) return null;
     const dv = car.impact();
     if (dv > 3) car.applyDamage(world, dv);
-    if ((dv > WRECK_DV && this.speedBefore > WRECK_MIN_SPEED) || car.up.y < FLIP_UP) {
+    let shunted = false;
+    if (touched && dv > SPIN_DV && this.speedBefore > WRECK_MIN_SPEED) {
+      shunted = dv > SHUNT_DV;
+      // Knocked sideways: yaw away from the hit, and no driving until it's over
+      const hit = car.impactVector(this.tmp);
+      const right = -hit.x * car.forward.z + hit.z * car.forward.x;
+      const w = car.body.angvel();
+      car.body.setAngvel({ x: w.x, y: w.y - Math.sign(right) * SPIN_YAW * dv, z: w.z }, true);
+      this.spinning = SPIN_SECONDS;
+    }
+    if (shunted || (dv > WRECK_DV && this.speedBefore > WRECK_MIN_SPEED) || car.up.y < FLIP_UP) {
       this.wrecked = true;
       this.wreckedAt = time;
       return 'wrecked';

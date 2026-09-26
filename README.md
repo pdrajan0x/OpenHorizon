@@ -5,8 +5,9 @@ look. Real supercars (Lamborghini, Ferrari, Bugatti), living traffic, events wai
 rivals to take down, and crashes worth watching. Browser game: Three.js rendering, Rapier physics,
 TypeScript, Vite.
 
-All models, the city and the engine sound come from GTA V mods: cars and maps from gta5-mods.com
-and similar sites, converted locally. The mod files are for local, personal play only: they're
+All models, the city, its street props and trees, and the sounds come from mods: cars, maps, props
+and engine sounds from GTA V mods on gta5-mods.com and similar sites, crash sounds from BeamNG.drive
+mods, converted locally. The mod files are for local, personal play only: they're
 downloaded into `.mods/`, converted into `public/mods/`, and never committed or redistributed. Sources
 and authors are listed in `assets/mods.json` and `assets/CREDITS.md`.
 
@@ -23,13 +24,25 @@ node scripts/fetch-mods.mjs                      # download + unpack the mods li
 node scripts/convert-cars.mjs                    # cars → .build/cars/*.glb + handling data
 node scripts/optimize-models.mjs                 # → public/mods/cars/<id>.glb (hero) and <id>_lod.glb
 C="dotnet tools/gta5conv/bin/Release/net10.0/gta5conv.dll"
-$C map .mods/map-windy-city-chicago public/mods/maps/chicago --cell 250
-$C map .mods/map-shibuya public/mods/maps/shibuya
+# Street props and trees: map mods place GTA's own lamp posts, traffic lights and trees without
+# shipping them, so they come from prop mods that do (the archives inside are unpacked first)
+$C rpf ".mods/props-lights-festive/x/Festive Streetlights V (free)/Festive-Streetlights-V_Yash-Kanojia.oiv.x/content/v_traffic_lights.rpf" .mods/props-lights-festive/rpf
+$C rpf .mods/props-traffic-nyc/x/LCUPDATE/Extra/props.rpf .mods/props-traffic-nyc/rpf
+$C rpf .mods/props-trees-cherry/x/cherry/v_trees.rpf .mods/props-trees-cherry/rpf
+PROPS="--props .mods/props-traffic-nyc --props .mods/props-lights-festive --props .mods/props-trees-cherry"
+$C map .mods/map-windy-city-chicago public/mods/maps/chicago --cell 250 $PROPS
+$C map .mods/map-shibuya public/mods/maps/shibuya $PROPS
 $C audio .mods/ferrari-sf90/rpf public/mods/audio/ferrari --id ferrari --kind engine
+mkdir -p public/mods/audio/crash                 # crash + glass recordings (BeamNG crash sound mods)
+cp .mods/audio-crash-better/x/art/sound/crash.ogg public/mods/audio/crash/crash-1.ogg
+cp .mods/audio-crash-alpha/x/art/sound/crash.ogg public/mods/audio/crash/crash-2.ogg
+for i in 01 02 03 05 06 07; do cp .mods/audio-crash-better/x/art/sound/glass_shatter_$i.ogg public/mods/audio/crash/glass-$i.ogg; done
+cp .mods/audio-crash-alpha/x/art/sound/glass_shatter_01.ogg public/mods/audio/crash/glass-alpha.ogg
 ```
 
 `gta5conv` also has `dump <file.yft>`, `rpf <dlc.rpf> <outdir>` (unpack an archive) and
-`map <dir> --inspect` for looking inside mods.
+`map <dir> --inspect` for looking inside mods. A map conversion writes `missing.json` (archetypes the
+map places that no mod supplies, by name hash) and `props.json` (triangle cost per prop) next to it.
 
 ## Run
 
@@ -79,7 +92,7 @@ node scripts/audio-test.mjs  # renders an engine rev sweep to test-results/engin
 ```
 
 URL flags for testing: `?traffic=0` empties the streets, `?spawn=<event id>` starts inside an event's
-ring, `?debug` exposes live game objects as `window.__debug`.
+ring, `?at=x,z` on the road nearest a map point, `?debug` exposes live game objects as `window.__debug`.
 
 ## Layout
 
@@ -93,7 +106,7 @@ ring, `?debug` exposes live game objects as `window.__debug`.
 - `src/rivals.ts`: AI rival racers on full physics cars; takedowns
 - `src/stunts.ts`: near misses, oncoming, air, drift chains, crash detection, stunt scoring
 - `src/damage.ts`: dents and crumples car bodies at the point of impact
-- `src/engineAudio.ts`, `src/audio.ts`: the mod's granular engine sound; tire and crash sounds
+- `src/engineAudio.ts`, `src/audio.ts`: the mod's granular engine sound; tire, crash and glass sounds
 - `src/drift.ts`: drift detection and the segmented boost meter
 - `src/atmosphere.ts`, `src/postfx.ts`: night sky, haze, rain, reflections, bloom
 - `src/camera.ts`, `src/hud.ts`, `src/minimap.ts`, `src/effects.ts`: camera, HUD, map, skid marks, sparks

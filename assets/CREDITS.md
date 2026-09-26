@@ -1,6 +1,6 @@
 # Credits
 
-The cars, city maps and engine sound in this game come from GTA V mods by these authors.
+The cars, city maps, street props, trees and sounds in this game come from mods by these authors.
 They are downloaded by `scripts/fetch-mods.mjs` for local, personal play and are not redistributed
 with this project. All rights remain with their creators (and, for ported models, the original
 rights holders).
@@ -40,6 +40,19 @@ rights holders).
 - [NFSU2 Bayview Map in GTA 5](https://www.gta5-mods.com/maps/nfsu2-map-in-gta-5) by Cesar Design, FV Mods (original content: EA Black Box)
 - [GTA: Dubai Islands [Add-on Map] (Standard V2.1)](https://www.gta5-mods.com/maps/dubai-islands-addonmap) by GTA Belgium
 - [Midnight Shuto](https://www.gta5-mods.com/maps/midnight-shuto) by FV Mods (original map: Bandai Namco Amusement)
+
+## Street props and trees
+
+- [Festive Streetlights V](https://www.gta5-mods.com/maps/festive-streetlights-v) by Yash-fantasy-mods (Yash Kanojia)
+- [NYC Traffic signals](https://www.gta5-mods.com/misc/nyc-traffic-signals) by gtacarxx (model: Sebastian Chavez)
+- [Cherry Blossom in GTA V (Tree Retexture)](https://www.gta5-mods.com/misc/cherry-blossom-in-gta-v-tree-retexture) by John-Doe
+
+## Sounds
+
+- [Real Sounds Mod (ALL IN ONE)](https://www.gta5-mods.com/vehicles/real-sounds-mod-by-peaceone-all-in-one) by PeaceONE
+- [Realistic Tire Skid Sound Mod](https://www.gta5-mods.com/misc/realistic-tire-skid-sound-mod) by StraightGlitcheZ
+- [Better Crash Sounds (BeamNG.drive)](https://www.beamng.com/resources/better-crash-sounds-completed.2554/) by Sugarking22795
+- [Alpha - Crash Sound Mod (BeamNG.drive)](https://www.beamng.com/resources/crash-sound-mod.2984/) by DriftTuner
 
 ## Tools
 

@@ -65,7 +65,7 @@ async function load(spawn) {
   // Per-physics-step log of rival wrecks, finishes and takedowns, by wrapping RivalPack.postStep
   await page.evaluate(async () => {
     const d = window.__debug;
-    const { nearestNode, nodePosition } = await import('/src/route.ts');
+    const roads = d.map.roads;
     const pack = d.rivals;
     const log = (window.__ai = { wrecks: [], takedowns: [], finished: {}, go: null, field: null });
     // What a collider is, for wreck diagnostics
@@ -94,12 +94,12 @@ async function load(spawn) {
         }
         if (!before[k].wrecked && r.wrecked) {
           const q = r.car.body.translation();
-          const n = nearestNode(q.x, q.z);
-          const c = nodePosition(n);
+          const n = roads.nearestNode(q.x, q.z);
+          const c = roads.nodes[n];
           log.wrecks.push({
             t: log.go === null ? null : time - log.go, id: r.id, name: r.name,
             shoved: r.shovedByPlayer(time), speed: before[k].speed, dv: r.car.impact(), upY: r.car.up.y,
-            hit: hits[k], node: `${n.i},${n.j}`, dx: q.x - c.x, dz: q.z - c.z,
+            hit: hits[k], node: n, dx: q.x - c.x, dz: q.z - c.z,
             heading: Math.atan2(r.car.forward.z, r.car.forward.x), shift: r.shift,
           });
         }
@@ -127,19 +127,17 @@ async function startPilot(id) {
   await page.evaluate(async (id) => {
     const d = window.__debug;
     const { Rival } = await import('/src/rivals.ts');
-    const { EVENTS } = await import('/src/events.ts');
-    const { routePolyline } = await import('/src/route.ts');
     const car = d.player();
-    const def = EVENTS.find((e) => e.id === id);
+    const def = d.events.defs.find((e) => e.id === id);
     const field = d.events.running.field;
     const pilot = new Rival(d.world, d.scene, car.tuning, 'YOU', 99);
     pilot.car.dispose(d.world, d.scene);
     pilot.car = car;
-    const nodes = field.route(def.at, () => 0, 1);
+    const nodes = field.route(def.at);
     const p = car.body.translation();
     const f = car.forward;
     const at = new d.THREE.Vector3(p.x, 0, p.z);
-    pilot.setPath([at.clone().addScaledVector(f, -5), at, ...routePolyline(nodes).slice(1)], 5);
+    pilot.setPath([at.clone().addScaledVector(f, -5), at, ...d.map.roads.polyline(nodes).slice(1)], 5);
     const orig = car.fixedUpdate.bind(car);
     car.fixedUpdate = (c, dt) => {
       const live = d.events.running?.phase === 'live' && !window.__game.crashed;
@@ -230,7 +228,7 @@ function printRace(res) {
 const SCENARIOS = [
   { name: 'gentle side nudge 1.5 m/s', kind: 'side', push: 1.5, expect: false },
   { name: 'light rear tap +3 m/s', kind: 'rear', push: 3, expect: false },
-  { name: 'side shove 6 m/s', kind: 'side', push: 6, expect: true },
+  { name: 'side shove 6 m/s', kind: 'side', push: 6, expect: 'spin' }, // knocked out of control; a takedown only if it then hits something
   { name: 'side slam 10 m/s', kind: 'side', push: 10, expect: true },
   { name: 'rear ram +16 m/s', kind: 'rear', push: 16, expect: true },
 ];
@@ -267,15 +265,24 @@ async function shove(k, sc) {
     const v = r.car.body.linvel();
     const right = { x: -f.z, z: f.x };
     const heading = Math.atan2(f.z, f.x);
-    // Side: 2.4 m to its left (the centerline side), pushing it toward the curb and buildings
+    // Side: 2.7 m to its left (clear of its body) (the centerline side), pushing it toward the curb and buildings
     const pos = sc.kind === 'side'
-      ? new d.THREE.Vector3(q.x - right.x * 2.4, 0.35, q.z - right.z * 2.4)
-      : new d.THREE.Vector3(q.x - f.x * 6, 0.35, q.z - f.z * 6);
+      ? new d.THREE.Vector3(q.x - right.x * 2.7, q.y + 0.1, q.z - right.z * 2.7)
+      : new d.THREE.Vector3(q.x - f.x * 6, q.y + 0.1, q.z - f.z * 6);
     car.reset(pos, -heading);
     const push = sc.kind === 'side' ? { x: right.x * sc.push, z: right.z * sc.push } : { x: f.x * sc.push, z: f.z * sc.push };
     car.body.setLinvel({ x: v.x + push.x, y: 0, z: v.z + push.z }, true);
-    return { t: d.simTime(), name: r.name, speed: r.car.speed };
-  }, { k, sc });
+    return { t: d.simTime(), name: r.name, speed: r.car.speed, k };
+  }, { k, sc }).then(async (info) => {
+    // Did the shove knock it out of control? (sampled over the next half second)
+    let spun = false;
+    const t0 = (await state()).simTime;
+    while ((await state()).simTime < t0 + 0.6 && !spun) {
+      spun = await page.evaluate((k) => window.__debug.rivals.rivals[k].spinning > 0, info.k);
+      await page.waitForTimeout(30);
+    }
+    return { ...info, spun };
+  });
 }
 
 async function rage() {
@@ -306,8 +313,8 @@ async function rage() {
       const w = await page.evaluate((n) => window.__ai.wrecks.slice(n), logBefore);
       const mine = w.filter((x) => x.name === info.name);
       const took = after.takedowns - before;
-      const ok = sc.expect ? took > 0 : took === 0 && mine.length === 0;
-      results.push({ sc, ok, took, wrecked: mine.length, speed: info.speed, detail: mine.map((x) => `dv=${x.dv.toFixed(1)} upY=${x.upY.toFixed(2)} hit=[${x.hit}]`).join(' ') });
+      const ok = sc.expect === 'spin' ? took > 0 || info.spun : sc.expect ? took > 0 : took === 0 && mine.length === 0;
+      results.push({ sc, ok, took, wrecked: mine.length, speed: info.speed, detail: (info.spun ? 'spun out ' : '') + mine.map((x) => `dv=${x.dv.toFixed(1)} upY=${x.upY.toFixed(2)} hit=[${x.hit}]`).join(' ') });
       await waitSim(3.5, (s) => !s.crashed && s.simTime > after.simTime + 2.6);
       if (!(await state()).event.startsWith(`${RAGE}:live`)) {
         // The event ended (won or timed out): restart it for the remaining scenarios

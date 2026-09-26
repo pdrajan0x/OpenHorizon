@@ -1,11 +1,13 @@
-// Car audio. The engine is a GTA V mod's granular engine (engineAudio.ts) and the tire squeal a mod's
-// skid recording; synthesized stand-ins only fill in until they load. Crash thumps are still
-// synthesized (no crash sound mod yet). Browsers only
-// allow audio after a user gesture, so the graph is built on the first key or pointer press.
+// Car audio. The engine is a GTA V mod's granular engine (engineAudio.ts), the tire squeal a mod's
+// skid recording, and crashes real crash-test and glass recordings from BeamNG crash sound mods;
+// synthesized stand-ins only fill in until they load. Browsers only allow audio after a user
+// gesture, so the graph is built on the first key or pointer press.
 import { GranularEngine } from './engineAudio';
 
 const DEFAULT_ENGINE = 'lambo-v12';
 const SKID_SOUND = '/mods/audio/skid/tarmac.ogg'; // from a tire skid sound mod
+const CRASH_SOUNDS = ['crash-1', 'crash-2'].map((n) => `/mods/audio/crash/${n}.ogg`);
+const GLASS_SOUNDS = ['glass-01', 'glass-02', 'glass-03', 'glass-05', 'glass-06', 'glass-07', 'glass-alpha'].map((n) => `/mods/audio/crash/${n}.ogg`);
 
 // Fake gearbox: upper speed (m/s) of each gear, so pitch climbs and drops like shifts
 const GEAR_TOPS = [0, 14, 24, 34, 45, 57, 80];
@@ -23,6 +25,9 @@ export class CarAudio {
   private noise?: AudioBuffer;
   private engine: GranularEngine | null = null;
   private engineSet = DEFAULT_ENGINE;
+  private crashes: AudioBuffer[] = [];
+  private glass: AudioBuffer[] = [];
+  private nextBump = 0;
 
   constructor() {
     const start = () => {
@@ -78,10 +83,47 @@ export class CarAudio {
       .catch(() => {});
   }
 
-  /** A crunch: filtered noise with a low thump; `strength` 0..1. */
+  /** A crash; `strength` 0..1. Hard ones shatter glass too. */
   crash(strength: number): void {
     const ctx = this.ctx;
-    if (!ctx || !this.master || !this.noise) return;
+    if (!ctx || !this.master) return;
+    if (this.crashes.length) {
+      this.play(pick(this.crashes), 0.5 + 0.9 * strength, 0.92 + Math.random() * 0.16);
+      if (strength > 0.45 && this.glass.length) this.play(pick(this.glass), 0.35 + 0.5 * strength, 0.95 + Math.random() * 0.1, 0.03);
+      return;
+    }
+    this.synthCrash(strength);
+  }
+
+  /** A knock off a wall or car that only dents: the crash recording, quiet and muffled. `strength` 0..1. */
+  bump(strength: number): void {
+    if (!this.ctx || !this.crashes.length || this.ctx.currentTime < this.nextBump) return;
+    this.nextBump = this.ctx.currentTime + 0.3; // a scrape along a wall dents every step; one knock is enough
+    this.play(pick(this.crashes), 0.12 + 0.4 * strength, 1.05 + Math.random() * 0.2, 0, 600 + 3000 * strength);
+  }
+
+  private play(buffer: AudioBuffer, volume: number, rate: number, delay = 0, lowpass = 0): void {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    let out: AudioNode = src;
+    if (lowpass) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = lowpass;
+      out = src.connect(f);
+    }
+    out.connect(gain).connect(this.master!);
+    src.start(ctx.currentTime + delay);
+  }
+
+  /** Stand-in until the recordings load: filtered noise with a low thump. */
+  private synthCrash(strength: number): void {
+    const ctx = this.ctx!;
+    if (!this.master || !this.noise) return;
     const now = ctx.currentTime;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
@@ -167,6 +209,9 @@ export class CarAudio {
     this.skidGain.connect(master);
     source.connect(band).connect(this.skidGain);
     source.start();
+    const load = (url: string) => fetch(url).then((r) => r.arrayBuffer()).then((d) => ctx.decodeAudioData(d));
+    for (const url of CRASH_SOUNDS) load(url).then((b) => this.crashes.push(b)).catch(() => {});
+    for (const url of GLASS_SOUNDS) load(url).then((b) => this.glass.push(b)).catch(() => {});
     // Swap the synthesized squeal for the mod's recorded tire skid once it loads
     fetch(SKID_SOUND)
       .then((r) => r.arrayBuffer())
@@ -182,3 +227,5 @@ export class CarAudio {
       .catch(() => {});
   }
 }
+
+const pick = <T>(list: T[]): T => list[Math.floor(Math.random() * list.length)];

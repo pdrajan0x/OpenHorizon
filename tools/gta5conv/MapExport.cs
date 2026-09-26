@@ -1,6 +1,6 @@
 // Map conversion: GTA V map mods → streaming cells for the game (see MapWriter.cs for the format).
 //   gta5conv map <unpacked mod dir> --inspect [ydr name]   list what's inside
-//   gta5conv map <unpacked mod dir> <outdir> [--cell 200] [--max-tex 1024]
+//   gta5conv map <unpacked mod dir> <outdir> [--cell 200] [--max-tex 1024] [--props <prop mod dir>]…
 using CodeWalker.GameFiles;
 using SharpDX;
 
@@ -10,12 +10,16 @@ static class MapExport
     {
         var inputs = new List<string>();
         bool inspect = false;
+        var props = new List<string>();
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--inspect") inspect = true;
+            else if (args[i] == "--props") props.Add(args[++i]);
+            else if (args[i] is "--cell" or "--max-tex") i++;
             else inputs.Add(args[i]);
         }
         var mod = ModFiles.Scan(inputs[0]);
+        foreach (var dir in props) mod.AddProps(ModFiles.Scan(dir));
         if (inspect && inputs.Count > 1) { InspectGeoms(mod, inputs[1]); return; }
         if (inspect) { Inspect(mod); return; }
         MapWriter.Write(mod, inputs[1], args);
@@ -121,8 +125,9 @@ static class MapExport
 /// <summary>All GTA files of an unpacked mod, keyed by lowercase name without extension.</summary>
 class ModFiles
 {
-    public readonly SortedDictionary<string, string> Ymaps = [], Ytyps = [], Ydrs = [], Ydds = [], Ytds = [], Ybns = [], Ynds = [];
+    public readonly SortedDictionary<string, string> Ymaps = [], Ytyps = [], Ydrs = [], Ydds = [], Yfts = [], Ytds = [], Ybns = [], Ynds = [];
     public readonly List<string> Gtxds = [];
+    public readonly HashSet<string> PropNames = [];
 
     public static ModFiles Scan(string dir)
     {
@@ -135,11 +140,20 @@ class ModFiles
             var table = ext switch
             {
                 ".ymap" => m.Ymaps, ".ytyp" => m.Ytyps, ".ydr" => m.Ydrs, ".ydd" => m.Ydds,
-                ".ytd" => m.Ytds, ".ybn" => m.Ybns, ".ynd" => m.Ynds, _ => null,
+                ".yft" => m.Yfts, ".ytd" => m.Ytds, ".ybn" => m.Ybns, ".ynd" => m.Ynds, _ => null,
             };
             if (table != null) table.TryAdd(name, path);
             else if (Path.GetFileName(path).ToLowerInvariant() is "gtxd.meta" or "gtxd.ymt") m.Gtxds.Add(path);
         }
         return m;
+    }
+
+    /// <summary>Add another mod's models and textures (props, trees) for archetypes this map uses but doesn't ship.</summary>
+    public void AddProps(ModFiles other)
+    {
+        foreach (var (k, v) in other.Ydrs) if (Ydrs.TryAdd(k, v)) PropNames.Add(k);
+        foreach (var (k, v) in other.Ydds) Ydds.TryAdd(k, v);
+        foreach (var (k, v) in other.Yfts) if (!Ydrs.ContainsKey(k) && Yfts.TryAdd(k, v)) PropNames.Add(k);
+        foreach (var (k, v) in other.Ytds) Ytds.TryAdd(k, v);
     }
 }

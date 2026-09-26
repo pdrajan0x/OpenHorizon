@@ -61,11 +61,12 @@ async function main(): Promise<void> {
   scene.add(map.root);
   const atmosphere = new Atmosphere(scene);
 
-  // ?spawn=<event id> starts inside that event's start ring
+  // ?spawn=<event id> starts inside that event's start ring; ?at=x,z on the road nearest a map point
   const spawnParam = params.get('spawn') ?? '';
   const eventDefs = makeEvents(map.roads, map.spawn);
   const spawnEvent = eventDefs.find((e) => e.id === spawnParam);
-  const spawnAt = spawnEvent ? map.roads.nodes[spawnEvent.at] : map.spawn;
+  const [atX, atZ] = (params.get('at') ?? '').split(',').map(Number);
+  const spawnAt = spawnEvent ? map.roads.nodes[spawnEvent.at] : Number.isFinite(atZ) ? { x: atX, z: atZ } : map.spawn;
   const spawn = map.roads.roadPose(spawnAt.x, spawnAt.z, 0);
   await map.prime(spawn.position);
   atmosphere.captureEnvironment(renderer, scene, spawn.position.clone().setY(spawn.position.y + 25));
@@ -254,7 +255,10 @@ async function main(): Promise<void> {
       traffic.postStep(simTime);
       for (const r of rivals.postStep(simTime, player, aheadOfPlayer)) onTakedown(r);
       const hit = player.impact();
-      if (hit > DENT_DV) player.applyDamage(world, hit);
+      if (hit > DENT_DV) {
+        player.applyDamage(world, hit);
+        audio.bump(Math.min(1, (hit - DENT_DV) / 8));
+      }
       if (!crash && !frozen) {
         const shielded = rivals.rivals.some((r) => r.touchingPlayer(simTime));
         if (stunts.step(player, simTime, speedBefore, h, shielded)) startCrash(speedBefore);

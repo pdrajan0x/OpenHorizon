@@ -55,9 +55,12 @@ static class MapWriter
             foreach (var t in ytd.TextureDict?.Textures?.data_items ?? []) if (t?.Name != null) textures.TryAdd(t.Name, t);
         }
 
-        // Drawables by name hash: loose .ydr files, and every entry of .ydd dictionaries
+        // Drawables by name hash: loose .ydr files, fragments (.yft), and every entry of .ydd dictionaries
         var drawablePaths = mod.Ydrs.ToDictionary(kv => JenkHash.GenHash(kv.Key), kv => kv.Value);
+        var props = mod.PropNames.Select(n => JenkHash.GenHash(n)).ToHashSet();
+        var fragPaths = mod.Yfts.ToDictionary(kv => JenkHash.GenHash(kv.Key), kv => kv.Value);
         var drawables = new Dictionary<uint, DrawableBase>();
+        var propBounds = new Dictionary<uint, Bounds>();
         foreach (var (_, path) in mod.Ydds)
         {
             var ydd = new YddFile();
@@ -67,12 +70,29 @@ static class MapWriter
         DrawableBase drawableFor(uint hash)
         {
             if (drawables.TryGetValue(hash, out var d)) return d;
-            if (!drawablePaths.TryGetValue(hash, out var path)) return drawables[hash] = null;
-            var ydr = new YdrFile();
-            ydr.Load(File.ReadAllBytes(path));
-            foreach (var t in ydr.Drawable?.ShaderGroup?.TextureDictionary?.Textures?.data_items ?? [])
+            DrawableBase found = null;
+            string path = null;
+            try
+            {
+                if (drawablePaths.TryGetValue(hash, out path))
+                {
+                    var ydr = new YdrFile();
+                    ydr.Load(File.ReadAllBytes(path));
+                    found = ydr.Drawable;
+                    propBounds[hash] = ydr.Drawable?.Bound;
+                }
+                else if (fragPaths.TryGetValue(hash, out path))
+                {
+                    var yft = new YftFile();
+                    yft.Load(File.ReadAllBytes(path));
+                    found = yft.Fragment?.Drawable;
+                    propBounds[hash] = yft.Fragment?.PhysicsLODGroup?.PhysicsLOD1?.Bound ?? yft.Fragment?.Drawable?.Bound;
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"skipping unreadable {path}: {ex.GetType().Name}"); }
+            foreach (var t in found?.ShaderGroup?.TextureDictionary?.Textures?.data_items ?? [])
                 if (t?.Name != null) textures.TryAdd(t.Name, t);
-            return drawables[hash] = ydr.Drawable;
+            return drawables[hash] = found;
         }
 
         // Entities. Skip SLODs and any LOD whose detailed children exist (they'd overlap them).
@@ -90,7 +110,7 @@ static class MapWriter
         }
         var placed = new List<(YmapEntityDef e, DrawableBase d)>();
         int missing = 0;
-        var missingNames = new HashSet<string>();
+        var missingNames = new Dictionary<string, int>();
         foreach (var y in ymaps.Values)
             foreach (var e in y.AllEntities ?? [])
             {
@@ -100,7 +120,7 @@ static class MapWriter
                 var name = JenkIndex.GetString(e.CEntityDef.archetypeName);
                 if (name.Contains("slod") || name.EndsWith("_lod")) continue;
                 var d = drawableFor(e.CEntityDef.archetypeName);
-                if (d == null) { missing++; missingNames.Add(name); continue; }
+                if (d == null) { missing++; missingNames[name] = missingNames.GetValueOrDefault(name) + 1; continue; }
                 placed.Add((e, d));
             }
 
@@ -118,7 +138,7 @@ static class MapWriter
         foreach (var (e, d) in placed)
         {
             var world = Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position);
-            foreach (var model in d.DrawableModels?.High ?? [])
+            foreach (var model in ModelsFor(d, props.Contains(e.CEntityDef.archetypeName)))
                 foreach (var g in model.Geometries ?? [])
                 {
                     var vd = g.VertexData;
@@ -181,24 +201,43 @@ static class MapWriter
         // Collision from the mod's static bounds (already in world space)
         var colCells = new Dictionary<(int, int), (List<float> v, List<uint> i)>();
         long colTris = 0;
-        void addBounds(Bounds b)
+        void addTri(Vector3 a, Vector3 bb, Vector3 c)
         {
-            if (b is BoundComposite comp) { foreach (var ch in comp.Children?.data_items ?? []) if (ch != null) addBounds(ch); return; }
+            var m = (a + bb + c) / 3;
+            var key = ((int)MathF.Floor(m.X / cellSize), (int)MathF.Floor(m.Z / cellSize));
+            if (!colCells.TryGetValue(key, out var cc)) colCells[key] = cc = ([], []);
+            var baseIndex = (uint)(cc.v.Count / 3);
+            cc.v.AddRange([a.X, a.Y, a.Z, bb.X, bb.Y, bb.Z, c.X, c.Y, c.Z]);
+            cc.i.AddRange([baseIndex, baseIndex + 1, baseIndex + 2]);
+            colTris++;
+        }
+        // `world` places the bound: identity for the map's own (world-space) bounds, the entity's matrix for props
+        void addBounds(Bounds b, Matrix world)
+        {
+            Vector3 at(Vector3 local) => toGame(Vector3.TransformCoordinate(local, world));
+            if (b is BoundComposite comp)
+            {
+                foreach (var ch in comp.Children?.data_items ?? []) if (ch != null) addBounds(ch, ch.Transform * world);
+                return;
+            }
+            if (b is BoundBox or BoundCapsule or BoundCylinder)
+            {
+                // Primitives (lamp posts, tree trunks) as their bounding box: 12 triangles
+                var lo = b.BoxMin; var hi = b.BoxMax;
+                var c = new Vector3[8];
+                for (int k = 0; k < 8; k++) c[k] = at(new Vector3((k & 1) != 0 ? hi.X : lo.X, (k & 2) != 0 ? hi.Y : lo.Y, (k & 4) != 0 ? hi.Z : lo.Z));
+                int[] faces = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3];
+                for (int f = 0; f < 24; f += 4)
+                {
+                    addTri(c[faces[f]], c[faces[f + 1]], c[faces[f + 2]]);
+                    addTri(c[faces[f]], c[faces[f + 2]], c[faces[f + 3]]);
+                }
+                return;
+            }
             if (b is not BoundGeometry bg || bg.Polygons == null) return;
             foreach (var p in bg.Polygons)
-            {
-                if (p is not BoundPolygonTriangle t) continue;
-                var a = toGame(bg.GetVertexPos(t.vertIndex1));
-                var bb = toGame(bg.GetVertexPos(t.vertIndex2));
-                var c = toGame(bg.GetVertexPos(t.vertIndex3));
-                var m = (a + bb + c) / 3;
-                var key = ((int)MathF.Floor(m.X / cellSize), (int)MathF.Floor(m.Z / cellSize));
-                if (!colCells.TryGetValue(key, out var cc)) colCells[key] = cc = ([], []);
-                var baseIndex = (uint)(cc.v.Count / 3);
-                cc.v.AddRange([a.X, a.Y, a.Z, bb.X, bb.Y, bb.Z, c.X, c.Y, c.Z]);
-                cc.i.AddRange([baseIndex, baseIndex + 1, baseIndex + 2]);
-                colTris++;
-            }
+                if (p is BoundPolygonTriangle t)
+                    addTri(at(bg.GetVertexPos(t.vertIndex1)), at(bg.GetVertexPos(t.vertIndex2)), at(bg.GetVertexPos(t.vertIndex3)));
         }
         // Some mods ship one combined collision file as well as split ones; skip any bound that
         // contains several others, so the same surfaces aren't added twice
@@ -208,7 +247,11 @@ static class MapWriter
             && a.BoxMin.X <= b.BoxMin.X + 1 && a.BoxMin.Y <= b.BoxMin.Y + 1 && a.BoxMin.Z <= b.BoxMin.Z + 1
             && a.BoxMax.X >= b.BoxMax.X - 1 && a.BoxMax.Y >= b.BoxMax.Y - 1 && a.BoxMax.Z >= b.BoxMax.Z - 1;
         foreach (var y in ybns)
-            if (ybns.Count(o => contains(y.Bounds, o.Bounds)) < 3) addBounds(y.Bounds);
+            if (ybns.Count(o => contains(y.Bounds, o.Bounds)) < 3) addBounds(y.Bounds, Matrix.Identity);
+        // Props (trees, lamp posts, traffic lights) bring their own collision
+        foreach (var (e, _) in placed)
+            if (props.Contains(e.CEntityDef.archetypeName) && propBounds.TryGetValue(e.CEntityDef.archetypeName, out var pb) && pb != null)
+                addBounds(pb, Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position));
 
         // Write cells
         var cellList = new JsonArray();
@@ -315,8 +358,35 @@ static class MapWriter
                 ["collisionTriangles"] = colTris, ["textures"] = written, ["roadNodes"] = roads.nodes.Count,
             },
         };
+        var propCost = placed.Where(p => props.Contains(p.e.CEntityDef.archetypeName))
+            .GroupBy(p => JenkIndex.GetString(p.e.CEntityDef.archetypeName))
+            .Select(g => (name: g.Key, count: g.Count(), tris: ModelsFor(g.First().d, true).Sum(x => (x.Geometries ?? []).Sum(q => (long)q.IndicesCount / 3))))
+            .OrderByDescending(x => x.count * x.tris)
+            .ToDictionary(x => x.name, x => $"{x.count} x {x.tris}");
+        File.WriteAllText(Path.Combine(outDir, "props.json"), JsonSerializer.Serialize(propCost, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(outDir, "missing.json"), JsonSerializer.Serialize(missingNames.OrderByDescending(kv => kv.Value).ToDictionary(), new JsonSerializerOptions { WriteIndented = true }));
         File.WriteAllText(Path.Combine(outDir, "manifest.json"), manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"{outDir}: {placed.Count} entities ({missing} missing: {string.Join(",", missingNames.Take(8))}), {triangles} tris, {cellList.Count} cells, {colTris} collision tris, {written} textures ({missingTex.Count} missing: {string.Join(",", missingTex.Take(10))}), {roads.nodes.Count} road nodes");
+        Console.WriteLine($"{outDir}: {placed.Count} entities ({missing} missing: {string.Join(",", missingNames.Keys.Take(8))}), {triangles} tris, {cellList.Count} cells, {colTris} collision tris, {written} textures ({missingTex.Count} missing: {string.Join(",", missingTex.Take(10))}), {roads.nodes.Count} road nodes");
+    }
+
+    const int PropTriangles = 2500;
+
+    /// <summary>The map's own models at full detail. Props (trees, lights) sit in their thousands, so take the most
+    /// detailed LOD under a triangle budget; GTA's own LOD chain drops leaves to cards well before a tree looks worse.</summary>
+    static DrawableModel[] ModelsFor(DrawableBase d, bool prop)
+    {
+        var m = d.DrawableModels;
+        if (m == null) return [];
+        if (!prop) return m.High ?? [];
+        DrawableModel[][] chain = [m.High, m.Med, m.Low, m.VLow];
+        DrawableModel[] last = [];
+        foreach (var lod in chain)
+        {
+            if (lod == null || lod.Length == 0) continue;
+            last = lod;
+            if (lod.Sum(x => (x.Geometries ?? []).Sum(g => (long)g.IndicesCount / 3)) <= PropTriangles) return lod;
+        }
+        return last;
     }
 
     static string Safe(string name) => string.Concat(name.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' ? c : '_'));
