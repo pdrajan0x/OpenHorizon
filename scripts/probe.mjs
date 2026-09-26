@@ -1,17 +1,14 @@
 // Dev probe: load a game URL headless on the NVIDIA GPU, wait, evaluate an expression, screenshot.
 // Usage: node scripts/probe.mjs '<path?query>' '<js expression>' [seconds] [out.png]
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 import { createServer } from 'vite';
 
 const [path, expr, seconds = '4', out] = process.argv.slice(2);
 const server = await createServer({ logLevel: 'error', server: { port: 5311 } });
 await server.listen();
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/chromium',
-  args: ['--use-angle=gl-egl', '--ignore-gpu-blocklist'],
-  env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: '1' },
-});
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const browser = await launch();
+const [vw, vh] = (process.env.PROBE_SIZE ?? '1280x720').split('x').map(Number);
+const page = await browser.newPage({ viewport: { width: vw, height: vh } });
 page.on('pageerror', (e) => console.log('PAGEERROR', String(e)));
 page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && console.log(m.type().toUpperCase(), m.text().slice(0, 300)));
 try {

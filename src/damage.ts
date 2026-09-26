@@ -284,6 +284,17 @@ export class CarDamage {
     this.smokeStrength = 0;
   }
 
+  /** Totaled: at least this badly damaged, and smoking from the middle of the car if no hit set a spot. */
+  totaled(): void {
+    this.damage = Math.max(this.damage, 0.97);
+    if (this.smokeStrength === 0) {
+      const box = boundsInRoot(this.root, this.root);
+      box.getCenter(this.smokeLocal);
+      this.smokeLocal.y = box.max.y * 0.8;
+    }
+    this.smokeStrength = Math.max(this.smokeStrength, 1);
+  }
+
   /** World-space point wreck smoke rises from, or null while this car isn't smoking. */
   smokeOrigin(target: THREE.Vector3): THREE.Vector3 | null {
     if (this.damage < SMOKE_FROM || !this.root.visible) return null;

@@ -1,10 +1,10 @@
 // Headless smoke test on the NVIDIA GPU (falls back to software WebGL elsewhere), on the mod city map.
 // Part 1 drives with no traffic: settles, accelerates forward, steers the right way, drifting fills
 // boost, boost spends it, R resets. Part 2 checks traffic is alive and not crashing. Part 3 starts a
-// race and a Road Rage and checks the rivals; part 4 drives flat out until it crashes, and respawns.
+// race and a Road Rage and checks the rivals; part 4 drives flat out until it crashes, and stays put, damaged.
 // Usage: npm run smoke   (CHROMIUM=/path/to/chrome to override the browser, SHOTS_DIR for screenshots)
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 import { createServer } from 'vite';
 
 const shots = process.env.SHOTS_DIR ?? 'test-results';
@@ -14,11 +14,7 @@ const server = await createServer({ logLevel: 'error', server: { port: 5199 } })
 await server.listen();
 const url = server.resolvedUrls.local[0];
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM ?? '/usr/bin/chromium',
-  args: ['--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
-  env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: '1' },
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -153,9 +149,11 @@ try {
   if (crashedAt) await page.screenshot({ path: `${shots}/crash.png` });
   check('a flat-out hit is a crash', crashedAt !== null, crashedAt ? `crashed at x=${crashedAt.x.toFixed(0)} z=${crashedAt.z.toFixed(0)}` : 'no crash in 25 s');
   if (crashedAt) {
-    await page.waitForFunction(() => !window.__game?.crashed, null, { timeout: 60_000 });
+    await page.waitForFunction(() => !window.__game?.crashed || window.__game?.wrecked, null, { timeout: 60_000 });
     const after = await hold([], 0.3);
-    check('after the crash cam the car drives on', after.upY > 0.9 && after.speedKmh > 20, `upY=${after.upY.toFixed(2)} ${after.speedKmh.toFixed(0)} km/h`);
+    // No respawn: the car stays where it crashed, worn down
+    const moved = Math.hypot(after.x - crashedAt.x, after.z - crashedAt.z);
+    check('a crash leaves the car where it stopped, damaged', moved < 25 && after.health < 1, `moved ${moved.toFixed(1)} m, health ${(after.health * 100).toFixed(0)}%`);
   }
 } catch (e) {
   errors.push(String(e));

@@ -24,6 +24,8 @@ export class Hud {
   private readonly eventEl = $('event');
   private readonly promptEl = $('prompt');
   private readonly progress = $('progress');
+  private readonly health = $('health');
+  private readonly healthFill = $('health').firstElementChild as HTMLElement;
   private bannerTimer = 0;
   private eventHtml = '';
   private promptHtml = '';
@@ -107,6 +109,10 @@ export class Hud {
       fill.parentElement!.classList.toggle('full', amount >= 1);
     });
     this.boost.classList.toggle('active', d.boosting);
+    const width = `${Math.round(car.health * 100)}%`;
+    if (this.healthFill.style.width !== width) this.healthFill.style.width = width;
+    this.health.classList.toggle('worn', car.health < 0.6);
+    this.health.classList.toggle('critical', car.health < 0.25);
 
     const banked = !d.drifting && d.lastChainAge < BANKED_SECONDS && d.lastChainScore > 0;
     this.drift.classList.toggle('show', d.drifting || banked);

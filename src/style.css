@@ -31,6 +31,10 @@ html, body {
 #speed .unit { font-size: 16px; margin-left: 6px; opacity: 0.8; }
 
 #boost { display: flex; gap: 6px; }
+#health { margin-top: 6px; height: 4px; background: rgba(255, 255, 255, 0.12); border-radius: 2px; overflow: hidden; }
+#health > i { display: block; height: 100%; width: 100%; background: #7dff9a; transition: width 0.3s, background 0.3s; }
+#health.worn > i { background: #ffc24a; }
+#health.critical > i { background: #ff3b3b; box-shadow: 0 0 8px #ff3b3b; }
 .seg {
   width: 52px; height: 12px;
   background: rgba(0, 0, 0, 0.35);

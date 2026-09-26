@@ -1,15 +1,11 @@
 // Screenshot a dev page on the NVIDIA GPU: node scripts/shot.mjs '<path?query>' out.png
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 import { createServer } from 'vite';
 
 const [path, out] = process.argv.slice(2);
 const server = await createServer({ logLevel: 'error', server: { port: 5310 } });
 await server.listen();
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM ?? '/usr/bin/chromium',
-  args: ['--use-angle=gl-egl', '--ignore-gpu-blocklist'],
-  env: { ...process.env, __NV_PRIME_RENDER_OFFLOAD: '1' },
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('PAGEERROR', String(e)));
 page.on('console', (m) => m.type() === 'error' && console.log('CONSOLE', m.text()));
