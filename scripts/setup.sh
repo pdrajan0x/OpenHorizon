@@ -101,11 +101,12 @@ if has maps; then
     # shellcheck disable=SC2086
     eval "$C map .mods/$mod $tmp $args --all-col ${PROPS[*]}" | tail -2
     rm -rf "public/mods/maps/$id" && mv "$tmp" "public/mods/maps/$id"
-  done < <(node -e 'for (const m of require("./assets/maps.json")) console.log([m.id, m.mod, m.args.map((a) => `'"'"'${a}'"'"'`).join(" ")].join("\t"))')
+  done < <(node -e 'for (const m of require("./assets/maps.json")) if (!m.retired) console.log([m.id, m.mod, m.args.map((a) => `'"'"'${a}'"'"'`).join(" ")].join("\t"))')
 fi
 
-# 6. CARLA's large towns (Town 12, Town 13; CC BY): the simulator's packaged build (16 GB download), its
-#    cooked Unreal levels converted by tools/ueconv, roads from their OpenDRIVE files
+# 6. CARLA's towns (CC BY): the simulator's packaged build (16 GB download), its cooked Unreal levels
+#    converted by tools/ueconv, roads from their OpenDRIVE files. Town 12 (large) and Town 10 (the HD
+#    downtown); Town 13 and Town 15 convert the same way but are out of the world (scripts/map-index.mjs)
 if has carla; then
   d=.mods/carla
   mkdir -p "$d"
@@ -118,17 +119,21 @@ if has carla; then
     tar xzf "$d/AdditionalMaps_0.9.15.tar.gz" -C "$d/x"
   fi
   (cd tools/ueconv && dotnet build -c Release -v q -nologo)
-  for t in 12 13; do
-    id=carla-town$t
+  maps="CarlaUE4/Content/Carla/Maps"
+  # id, level, road file
+  while read -r id level xodr; do
     [[ -n ${MAPS:-} && " $MAPS " != *" $id "* ]] && continue
     [[ -f public/mods/maps/$id/manifest.json && -z ${FORCE:-} ]] && { echo "= $id"; continue; }
     echo "> $id"
     tmp="public/mods/maps/.$id.tmp"
     rm -rf "$tmp"
-    m="$d/x/CarlaUE4/Content/Carla/Maps/Town$t"
-    dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll map "$d/x" "CarlaUE4/Content/Carla/Maps/Town$t/Town$t" "$tmp" --xodr "$m/OpenDrive/Town$t.xodr" | tail -1
+    DOTNET_GCConserveMemory=7 dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll map "$d/x" "$maps/$level" "$tmp" --xodr "$d/x/$maps/$xodr" | tail -1
     rm -rf "public/mods/maps/$id" && mv "$tmp" "public/mods/maps/$id"
-  done
+    node scripts/island-stats.mjs "$id" | tail -1
+  done <<'EOF_TOWNS'
+carla-town12 Town12/Town12 Town12/OpenDrive/Town12.xodr
+carla-town10 Town10HD OpenDrive/Town10HD.xodr
+EOF_TOWNS
 fi
 
 # 7. The cities' small textures remastered (Real-ESRGAN on the GPU, a few minutes a city): sharp facades up close

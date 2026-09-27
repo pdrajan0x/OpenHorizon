@@ -12,9 +12,9 @@ const names = new Map(index.map((m) => [m.id, m.name]));
 const area = (p) => Math.abs(p.reduce((s, [x1, z1], i) => { const [x2, z2] = p[(i + 1) % p.length]; return s + x1 * z2 - x2 * z1; }, 0) / 2);
 
 const cities = [];
-for (const id of fs.readdirSync(dir)) {
+for (const { id } of index) {
   const f = `${dir}/${id}/island.json`;
-  if (id.startsWith('.') || id.startsWith('bridge-') || !fs.existsSync(f)) continue;
+  if (!fs.existsSync(f)) continue;
   const loops = JSON.parse(fs.readFileSync(f, 'utf8')).loops.filter((l) => area(l.points) > 20000);
   const rect = [Infinity, Infinity, -Infinity, -Infinity];
   for (const l of loops) {

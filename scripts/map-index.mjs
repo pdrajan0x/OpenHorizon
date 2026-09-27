@@ -27,11 +27,19 @@ const INFO = {
   lordcity: { name: 'LordCity', area: 'forested hills: winding highways, tunnels and a cable-stayed bridge' },
   'carla-town12': { name: 'Town 12', area: 'big American town: a high-rise downtown, apartment blocks, suburbs, highways and farmland' },
   'carla-town13': { name: 'Town 13', area: 'big American town: downtown towers, old-town streets, suburbs, lakes and farmland' },
+  'carla-town10': { name: 'Town 10', area: 'downtown: brownstones, a classical library, shopfronts and towers' },
+  'ugase-city': { name: 'Ugase', area: 'Japanese coast town: a hillside village, forest touges and coast roads' },
 };
-const FIRST = ['chicago', 'miami'];
+// Converted but out of the world (not up to the rest: broken roads, low-resolution textures, procedural
+// boxes, or dull straights); their data stays on disk, so any can come back by leaving this list
+const RETIRED = new Set([
+  'miami', 'gostown', 'dubai-islands', 'monaco-gp', 'carla-town13', 'hong-kong', 'tokyo-shinjuku',
+  'nfsu2-bayview', 'midnight-shuto', 'fukuoka-expressway', 'dubai-highway', 'carla-town15',
+]);
+const FIRST = ['chicago'];
 
 const ids = readdirSync(DIR, { withFileTypes: true })
-  .filter((d) => d.isDirectory() && !d.name.startsWith('bridge-') && existsSync(`${DIR}/${d.name}/manifest.json`) && existsSync(`${DIR}/${d.name}/roads.json`))
+  .filter((d) => d.isDirectory() && !d.name.startsWith('bridge-') && !RETIRED.has(d.name) && existsSync(`${DIR}/${d.name}/manifest.json`) && existsSync(`${DIR}/${d.name}/roads.json`))
   .map((d) => d.name)
   .sort((a, b) => (FIRST.includes(a) ? FIRST.indexOf(a) : 99) - (FIRST.includes(b) ? FIRST.indexOf(b) : 99) || a.localeCompare(b));
 

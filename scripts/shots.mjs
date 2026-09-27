@@ -2,7 +2,8 @@
 //   node scripts/shots.mjs <out-prefix> "x,z[,heading];x,z"   the car on the road there (heading in radians)
 //   node scripts/shots.mjs <out-prefix> bridges:<n>          both joins of the first n bridges: the car on
 //                                                            the bridge, driving into the city
-// CAM=drone for the drone camera instead of the chase camera. Writes <out-prefix>-<k>.png.
+// CAM=drone for the drone camera instead of the chase camera; QUERY="&map=<id>" for one map on its own.
+// Writes <out-prefix>-<k>.png.
 import { launch } from './browser.mjs';
 import { createServer } from 'vite';
 
@@ -14,7 +15,7 @@ const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('PAGEERROR', String(e)));
 try {
-  await page.goto(server.resolvedUrls.local[0] + '?debug&audit&traffic=0', { timeout: 300_000, waitUntil: 'domcontentloaded' });
+  await page.goto(server.resolvedUrls.local[0] + '?debug&audit&traffic=0' + (process.env.QUERY ?? ''), { timeout: 300_000, waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1 && window.__audit, null, { timeout: 300_000 });
   const places = list.startsWith('bridges:')
     ? await page.evaluate((n) => {

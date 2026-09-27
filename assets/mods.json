@@ -1463,6 +1463,43 @@
     "fetchedBy": "manual (no direct link recorded)"
   },
   {
+    "id": "map-ugase-city",
+    "category": "map",
+    "title": "Ugase City: Fall Update [Add-On SP / FiveM]",
+    "author": "ON3FLY3R (based)",
+    "pageUrl": "https://www.gta5-mods.com/maps/ugase-city-sp-fivem-ymap",
+    "fileUrl": "https://files.gta5-mods.com/uploads/ugase-city-sp-fivem-ymap/7412ad-ugase_city_by_based_ONEFLYER_V2.1_SP.zip",
+    "format": "mixed",
+    "files": [],
+    "hasLoose": false,
+    "notes": "4.83/5 (38 votes), featured, ~25k downloads. A fictional Japanese coastal town with mountain touges, forest and coast roads; V2.1 fixed geometry, collisions, mipmaps and materials."
+  },
+  {
+    "id": "map-pinecrest",
+    "category": "map",
+    "title": "Pinecrest City [Add-On SP / FiveM]",
+    "author": "IceMove",
+    "pageUrl": "https://www.gta5-mods.com/maps/pinecrest-add-on-sp-fivem",
+    "fileUrl": "https://files.gta5-mods.com/uploads/pinecrest-add-on-sp-fivem/633af4-pinecrest.7z",
+    "extraFiles": [{ "url": "https://files.gta5-mods.com/uploads/pinecrest-add-on-sp-fivem/d5b28a-pinecrestcity.zip" }],
+    "format": "mixed",
+    "files": [],
+    "hasLoose": false,
+    "notes": "5.0/5 (22 votes), featured, October 2025. A snowy city frozen in the 1990s: Pinecrest Village plus the Pinecrest City Expansion."
+  },
+  {
+    "id": "map-los-injurus",
+    "category": "map",
+    "title": "(City of) Los Injurus (BeamNG.drive)",
+    "author": "bob.blunderton",
+    "pageUrl": "https://www.beamng.com/resources/city-of-los-injurus.10021/",
+    "fileUrl": "https://www.beamng.com/resources/city-of-los-injurus.10021/download?version=51636",
+    "format": "beamng-level",
+    "files": [],
+    "hasLoose": true,
+    "notes": "970k downloads, 4.77/5 (163 ratings), version 2023-12-20, 3.5 GB. A large Los Angeles-style city: downtown towers, freeways, suburbs, a subway. 'All pieces in this map may be used by others with credit AND a link-back to this resource.'"
+  },
+  {
     "id": "map-carla",
     "category": "map",
     "title": "CARLA Simulator 0.9.15: Town 12 and Town 13 (large maps)",

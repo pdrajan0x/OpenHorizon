@@ -1,21 +1,16 @@
-// The world's design: a small globe, three continents side by side, each with a temperate north and a
-// warm south, packed close so that every city's neighbours are about CHANNEL m of sea away and no drive
-// from one city to the next is a long empty crossing:
+// The world's design: three regions side by side, each a handful of the best-looking cities, packed so
+// that every city's neighbours are about CHANNEL m of sea away and no drive from one city to the next is
+// a long empty crossing:
 //
-//   the Americas (west)      north: the West Coast (Bayview), the Great Lakes (Chicago), and inland the
-//                            two big towns of the plains (CARLA's Town 12, laid out like Amarillo, and Town 13)
-//                            south: Florida (Miami, Gostown)
-//   Europe and the Gulf      north: the Mediterranean (the Riviera, Monaco)
-//                            south: the desert highway running down to the Gulf, the palm islands off it
-//   Asia (east)              north: the forested hills of LordCity, the Japanese mountain passes (Akina,
-//                            Tsukuba), Tokyo (Shibuya, Shinjuku, the Shuto expressway)
-//                            south: Fukuoka, Hong Kong
+//   the Americas (west)   the two big towns of the plains (CARLA's Town 12) and the Great Lakes (Chicago),
+//                         with CARLA's Town 10 downtown as an island between them
+//   Europe (middle)       the Mediterranean coast (the Riviera)
+//   Asia (east)           China (LordCity) and Japan: the coast town of Ugase, the mountain passes (Akina,
+//                         Tsukuba) and Tokyo (Shibuya)
 //
-// Links follow the real world: Chicago to the Riviera over the Atlantic, Monaco down to the Gulf, the
-// Gulf's palm islands on to Hong Kong, LordCity to Hong Kong within China, and so on, so there are loops
-// rather than one long chain, and neighbours never clash (no desert beside a rainforest). The palm
-// islands sit off the middle of the desert highway, as Palm Jumeirah lies off Sheikh Zayed Road, so the
-// highway has an exit halfway instead of being one long straight run.
+// Links follow the real world: Chicago over the Atlantic to the Riviera and on across the Pacific to
+// LordCity, the Riviera round to Japan's coast, and within each region a loop, so there are circuits
+// rather than one long chain.
 //
 // DESIGN gives each city's rough place (km) and the links; a small relaxation then settles the real
 // positions from the cities' sizes: linked cities pull to CHANNEL m apart, every pair pushes apart below
@@ -36,34 +31,21 @@ export interface LayoutLink {
 
 /** Rough centres in km, x north and z east. */
 const DESIGN: Record<string, [number, number]> = {
-  'carla-town12': [5, -34],
-  'carla-town13': [-8, -32],
-  'nfsu2-bayview': [5, -22],
-  chicago: [6, -14.5],
-  miami: [-4, -19],
-  gostown: [-5, -11.5],
-  'french-riviera': [9, -6.5],
-  'monaco-gp': [4.5, -5.5],
-  'dubai-highway': [-4, -4.5],
-  'dubai-islands': [-4, -0.5],
-  lordcity: [8, 1.5],
-  akina: [11, 6],
-  tsukuba: [7, 7],
-  shibuya: [10.5, 10.5],
-  'tokyo-shinjuku': [8.5, 11.5],
-  'midnight-shuto': [3, 16],
-  'fukuoka-expressway': [-6.5, 10.5],
-  'hong-kong': [-3, 4.5],
+  'carla-town12': [0, -20],
+  'carla-town10': [-2, -13.6],
+  chicago: [0, -6],
+  'french-riviera': [-4.5, 4],
+  lordcity: [3.2, 3.3],
+  'ugase-city': [-4.5, 10.6],
+  akina: [3.5, 7.3],
+  tsukuba: [3.2, 11.3],
+  shibuya: [-1.2, 11],
 };
 /** [a, b, rank]: 0 within a region, 1 between regions */
 const LINKS: [string, string, number][] = [
-  ['carla-town12', 'nfsu2-bayview', 0], ['carla-town12', 'carla-town13', 0], ['carla-town13', 'miami', 1],
-  ['nfsu2-bayview', 'chicago', 0], ['nfsu2-bayview', 'miami', 1], ['chicago', 'miami', 1], ['miami', 'gostown', 0],
-  ['chicago', 'french-riviera', 1], ['french-riviera', 'monaco-gp', 0], ['monaco-gp', 'dubai-highway', 1],
-  ['gostown', 'dubai-highway', 1], ['dubai-highway', 'dubai-islands', 0], ['dubai-islands', 'hong-kong', 1],
-  ['monaco-gp', 'lordcity', 1], ['lordcity', 'hong-kong', 1], ['lordcity', 'tsukuba', 0], ['lordcity', 'akina', 0],
-  ['akina', 'tsukuba', 0], ['akina', 'shibuya', 0], ['shibuya', 'tokyo-shinjuku', 0], ['tsukuba', 'tokyo-shinjuku', 0],
-  ['tokyo-shinjuku', 'midnight-shuto', 0], ['midnight-shuto', 'fukuoka-expressway', 0], ['fukuoka-expressway', 'hong-kong', 0],
+  ['carla-town12', 'chicago', 0], ['carla-town12', 'carla-town10', 0], ['carla-town10', 'chicago', 0],
+  ['chicago', 'french-riviera', 1], ['chicago', 'lordcity', 1], ['french-riviera', 'lordcity', 1], ['french-riviera', 'ugase-city', 1],
+  ['lordcity', 'akina', 0], ['lordcity', 'ugase-city', 0], ['ugase-city', 'shibuya', 0], ['akina', 'tsukuba', 0], ['tsukuba', 'shibuya', 0],
 ];
 
 const CHANNEL = 550; // m of sea between linked cities' land
