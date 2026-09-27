@@ -40,7 +40,7 @@ static class UeMap
     static readonly string[] DriveWords = ["road", "ground", "terrain", "landscape", "sidewalk", "curb", "kerb", "bridge", "tunnel", "ramp", "parking", "plaza", "street", "highway", "stair", "floor"];
     static readonly string[] NoCollideWords = ["marking", "decal", "stripe", "paint", "crosswalk", "puddle", "leak", "trash_", "banner", "wire", "cable"];
     const float Crop = 600; // m: cells farther than this from every road are left out (backdrop sea and sand planes)
-    const float SeaLevel = -2.5f; // m: the towns are built at 0 with no sea; ours goes this far below their ground
+    const float SeaLevel = -2.5f; // m, relative to the lowest roads: the towns have no sea; ours goes this far below them
     // Sublevels that hold no scenery (lighting, weather, particles) or things that move (parked cars)
     static readonly string[] SkipLevels = ["Weather", "Rendering_and_Lighting", "Particles", "Parked_Vehicles", "_Day", "_Night", "_Sunset"];
     static readonly string[] FoliageWords = ["foliage", "vegetation", "tree", "bush", "plant", "grass", "hedge", "shrub", "ivy", "flower", "leaf", "leaves"];
@@ -171,6 +171,12 @@ static class UeMap
         }
         Mat MatFor(UMaterialInterface mi)
         {
+            // A per-actor instance that sets no textures of its own (CARLA gives nearly every placed thing
+            // one) is its parent: one material, not thousands
+            if (mi is UMaterialInstance own && own.Parent is UMaterialInterface up
+                && (own.GetOrDefault<FTextureParameterValue[]>("TextureParameterValues")?.Length ?? 0) == 0
+                && own.GetPathName().Contains(":PersistentLevel.", StringComparison.Ordinal))
+                return MatFor(up);
             var key = mi?.GetPathName() ?? "none";
             if (mats.TryGetValue(key, out var m)) return m;
             m = new Mat { Index = mats.Count };
@@ -186,11 +192,21 @@ static class UeMap
                 m.Mask = mp.BlendMode == EBlendMode.BLEND_Masked;
             }
             catch (Exception e) { Console.WriteLine($"  ! material {key}: {e.Message}"); }
+            // Textures it doesn't set come from its parents
+            if ((m.Diffuse == null || m.Normal == null) && mi is UMaterialInstance inst0 && inst0.Parent is UMaterialInterface parent0)
+            {
+                var pm = MatFor(parent0);
+                m.Diffuse ??= pm.Diffuse;
+                m.Normal ??= pm.Normal;
+            }
+            if (m.Diffuse == null && Environment.GetEnvironmentVariable("UECONV_DEBUG") != null && mats.Count < 400)
+                Console.WriteLine($"  no diffuse: {key} ({mi.ExportType}) parent {(mi as UMaterialInstance)?.Parent?.GetPathName()}");
             // The base material's name: what it is (glass, water, decal…)
             UObject cur = mi;
             for (int i = 0; i < 8 && cur is UMaterialInstance inst && inst.Parent != null; i++) cur = inst.Parent;
             m.Shader = (cur?.Name ?? mi.Name).ToLowerInvariant();
-            if (m.Shader.Contains("glass") || mi.Name.Contains("glass", StringComparison.OrdinalIgnoreCase)) m.Shader += "_glass";
+            // Glass, and the fake room interiors behind windows (cube maps we don't draw): shiny glass
+            if (m.Shader.Contains("glass") || m.Shader.Contains("fakeinterior") || mi.Name.Contains("glass", StringComparison.OrdinalIgnoreCase)) m.Shader += "_glass";
             m.Water = m.Shader.Contains("water") || mi.Name.Contains("water", StringComparison.OrdinalIgnoreCase) || (m.Normal ?? "").Contains("water", StringComparison.OrdinalIgnoreCase) || (m.Diffuse ?? "").Contains("water", StringComparison.OrdinalIgnoreCase);
             return m;
         }
@@ -371,9 +387,13 @@ static class UeMap
             }
             Console.WriteLine($"  {level}: {pending.Count - before} placements");
             before = pending.Count;
+            // A tile's package (with its road meshes) is big: let it go before the next
+            pkg = null;
+            GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         }
         // Pass 2: geometry, one mesh at a time (loaded, placed everywhere, let go)
         var kept = new Dictionary<Mesh, double>();
+        int loadedMeshes = 0;
         foreach (var group in pending.GroupBy(q => q.mesh))
         {
             Mesh mesh;
@@ -399,6 +419,7 @@ static class UeMap
             // Its geometry is in the cells now
             mesh.Pos = mesh.Nrm = mesh.Uv = mesh.ColPos = null;
             mesh.Idx = mesh.ColIdx = null;
+            if (++loadedMeshes % 40 == 0) GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         }
         foreach (var (m, (name, count)) in cost.OrderByDescending(kv => kv.Key.Triangles * kv.Value.count).Take(20))
             Console.WriteLine($"  {m.Triangles * count / 1e6,8:F2} M tris  {count,6} × {m.Triangles,7}  {name}{(m.Foliage ? " [foliage]" : "")}");
@@ -556,8 +577,13 @@ static class UeMap
         int first = -1;
         for (int i = 0; i < mips.Length; i++)
             if (Math.Max(mips[i].SizeX, mips[i].SizeY) <= MaxTex && mips[i].EnsureValidBulkData(t.MipDataProvider, i)) { first = i; break; }
+        // Nothing small enough (some ship one big level and no mips): the largest there is, scaled down below
+        if (first < 0)
+            for (int i = 0; i < mips.Length && first < 0; i++)
+                if (mips[i].EnsureValidBulkData(t.MipDataProvider, i)) first = i;
         if (first < 0) return false;
-        if (t.Format is EPixelFormat.PF_DXT1 or EPixelFormat.PF_DXT5)
+        // DXT with its own mip chain: copied as it is
+        if (t.Format is EPixelFormat.PF_DXT1 or EPixelFormat.PF_DXT5 && mips.Length - first > 1 && Math.Max(mips[first].SizeX, mips[first].SizeY) <= MaxTex)
         {
             int block = t.Format == EPixelFormat.PF_DXT1 ? 8 : 16;
             var levels = new List<(int, int, byte[])>();
@@ -593,6 +619,18 @@ static class UeMap
             default:
                 Console.WriteLine($"  ! texture {t.Name}: decoded as {ct.PixelFormat}");
                 return false;
+        }
+        // Down to MaxTex (2×2 box)
+        while (w > MaxTex || h > MaxTex)
+        {
+            int nw = Math.Max(1, w >> 1), nh = Math.Max(1, h >> 1);
+            var next = new byte[nw * nh * 4];
+            for (int y = 0; y < nh; y++)
+                for (int x = 0; x < nw; x++)
+                    for (int k = 0; k < 4; k++)
+                        next[(y * nw + x) * 4 + k] = (byte)((rgba[((2 * y) * w + 2 * x) * 4 + k] + rgba[((2 * y) * w + Math.Min(w - 1, 2 * x + 1)) * 4 + k]
+                            + rgba[(Math.Min(h - 1, 2 * y + 1) * w + 2 * x) * 4 + k] + rgba[(Math.Min(h - 1, 2 * y + 1) * w + Math.Min(w - 1, 2 * x + 1)) * 4 + k] + 2) >> 2);
+            rgba = next; w = nw; h = nh;
         }
         bool normal = t.IsNormalMap || t.Format == EPixelFormat.PF_BC5;
         bool alpha = false;

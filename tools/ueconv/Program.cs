@@ -70,6 +70,45 @@ static class Program
             foreach (var (k, n) in kinds.OrderByDescending(kv => kv.Value)) Console.WriteLine($"  {n,6} {k}");
             return 0;
         }
+        if (args.Length >= 3 && args[0] == "mesh")
+        {
+            // A static mesh's materials and every texture CUE4Parse finds for each
+            var p = Open(args[1]);
+            var path = args[2].Replace(".uasset", "");
+            var sm = p.LoadPackageObject<CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh>($"{path}.{path[(path.LastIndexOf('/') + 1)..]}");
+            foreach (var slot in sm.StaticMaterials)
+            {
+                var mi = slot.MaterialInterface?.Load<CUE4Parse.UE4.Assets.Exports.Material.UMaterialInterface>();
+                Console.WriteLine($"slot {slot.MaterialSlotName}: {mi?.GetPathName()} ({mi?.ExportType})");
+                if (mi == null) continue;
+                var mp = new CUE4Parse.UE4.Assets.Exports.Material.CMaterialParams2();
+                mi.GetParams(mp, CUE4Parse.UE4.Assets.Exports.Material.EMaterialDepth.AllLayers);
+                foreach (var (k, v) in mp.Textures) Console.WriteLine($"   tex {k} = {(v as CUE4Parse.UE4.Assets.Exports.UObject)?.GetPathName() ?? v?.ToString()}");
+                foreach (var (k, v) in mp.Colors.Take(6)) Console.WriteLine($"   color {k} = {v}");
+                foreach (var (k, v) in mp.Scalars.Take(20)) Console.WriteLine($"   scalar {k} = {v}");
+                Console.WriteLine($"   blend {mp.BlendMode}");
+                var ok1 = mp.TryGetTexture2d(out var d1, CUE4Parse.UE4.Assets.Exports.Material.CMaterialParams2.Diffuse[0]);
+                var ok2 = mp.TryGetTexture2d(out var d2, CUE4Parse.UE4.Assets.Exports.Material.CMaterialParams2.FallbackDiffuse);
+                Console.WriteLine($"   TryGet Diffuse[0]: {ok1} {d1?.GetType().Name} {d1?.Name}; fallback: {ok2} {d2?.GetType().Name} {d2?.Name}; Diffuse[0] = {string.Join(",", CUE4Parse.UE4.Assets.Exports.Material.CMaterialParams2.Diffuse[0].Take(12))}");
+                if (mp.Textures.TryGetValue("PM_Diffuse", out var raw)) Console.WriteLine($"   raw PM_Diffuse: {raw.GetType().Name}");
+                for (var cur = mi as CUE4Parse.UE4.Assets.Exports.Material.UMaterialInstance; cur != null; cur = cur.Parent as CUE4Parse.UE4.Assets.Exports.Material.UMaterialInstance)
+                    Console.WriteLine($"   parent chain: {cur.Parent?.GetPathName()}");
+            }
+            return 0;
+        }
+        if (args.Length >= 3 && args[0] == "tex")
+        {
+            var p = Open(args[1]);
+            var path = args[2].Replace(".uasset", "");
+            var t = p.LoadPackageObject<CUE4Parse.UE4.Assets.Exports.Texture.UTexture2D>($"{path}.{path[(path.LastIndexOf('/') + 1)..]}");
+            Console.WriteLine($"{t.Name}: {t.Format}, {t.PlatformData.Mips.Length} mips, normal map {t.IsNormalMap}");
+            for (int i = 0; i < t.PlatformData.Mips.Length; i++)
+            {
+                var m = t.PlatformData.Mips[i];
+                Console.WriteLine($"  mip {i}: {m.SizeX}x{m.SizeY} valid {m.EnsureValidBulkData(t.MipDataProvider, i)} bytes {m.BulkData?.Data?.Length ?? -1} flags {m.BulkData?.Header.BulkDataFlags}");
+            }
+            return 0;
+        }
         if (args.Length >= 4 && args[0] == "map")
         {
             var i = Array.IndexOf(args, "--xodr");

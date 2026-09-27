@@ -6,6 +6,7 @@
 //   GRID=400 node scripts/audit.mjs         denser (slower)
 //   PLACES="x,z;x,z" node scripts/audit.mjs just these points
 //   CITIES="chicago miami" node scripts/audit.mjs
+//   BRIDGES=1 node scripts/audit.mjs        only the bridge ends
 // Output: test-results/audit/issues.json, report.md, shot-<n>.png
 import fs from 'node:fs';
 import { launch } from './browser.mjs';
@@ -27,7 +28,7 @@ try {
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1 && window.__audit, null, { timeout: 300_000 });
 
   // The plan: explicit places, or every bridge end plus a grid over each city's roads
-  const places = await page.evaluate(({ GRID, only, cities }) => {
+  const places = await page.evaluate(({ GRID, only, cities, bridgesOnly }) => {
     const d = window.__debug;
     if (only) return only.split(';').map((p) => { const [x, z] = p.split(',').map(Number); return { x, z, why: 'asked' }; });
     const map = d.map;
@@ -49,8 +50,9 @@ try {
       }
       for (const c of cells.values()) out.push({ x: c.x, z: c.z, why: map.info[i].name });
     });
+    if (bridgesOnly) return out.filter((p) => p.why === 'bridge end');
     return cities ? out.filter((p) => p.why !== 'bridge end') : out;
-  }, { GRID, only: process.env.PLACES, cities: process.env.CITIES });
+  }, { GRID, only: process.env.PLACES, cities: process.env.CITIES, bridgesOnly: !!process.env.BRIDGES });
   console.log(`${places.length} places to audit`);
 
   for (const [k, p] of places.entries()) {

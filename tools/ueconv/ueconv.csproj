@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <NoWarn>CS0168;CS0219;CA1416;NU1701;NU1903</NoWarn>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CUE4Parse" Version="1.2.2.202609" />

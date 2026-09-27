@@ -69,6 +69,31 @@ interface RenderHit {
   drawn: boolean; // the mesh is visible (not culled) where the ray meets it
 }
 
+/**
+ * Exact duplicate triangles (the same three corners to 2 cm, in any order): a numeric hash of the corners
+ * picks candidates, which are then compared corner by corner. Returns a test for each triangle in turn.
+ */
+function duplicateFinder(pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): (i0: number, i1: number, i2: number) => boolean {
+  const buckets = new Map<number, number[]>(); // hash → corner triples, 9 quantized ints each, flattened
+  const q = (i: number, k: number) => Math.round((k === 0 ? pos.getX(i) : k === 1 ? pos.getY(i) : pos.getZ(i)) * 50);
+  return (i0, i1, i2) => {
+    const corners = [i0, i1, i2].map((i) => [q(i, 0), q(i, 1), q(i, 2)]).sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    const flat = corners.flat();
+    let h = 2166136261;
+    for (const v of flat) h = Math.imul(h ^ v, 16777619);
+    const list = buckets.get(h);
+    if (list) {
+      for (let k = 0; k < list.length; k += 9) {
+        let same = true;
+        for (let j = 0; j < 9 && same; j++) same = list[k + j] === flat[j];
+        if (same) return true;
+      }
+      list.push(...flat);
+    } else buckets.set(h, flat);
+    return false;
+  };
+}
+
 const tmpRay = new THREE.Ray();
 const tmpInv = new THREE.Matrix4();
 const tmpSphere = new THREE.Sphere();
@@ -274,7 +299,7 @@ export class Audit {
       const idx = g.index!;
       this.stats.meshesChecked++;
       const flippedAt: THREE.Vector3[] = [];
-      const seen = new Map<string, number>();
+      const isDuplicate = duplicateFinder(pos);
       let dups = 0;
       let degenerate = 0;
       const dupAt: THREE.Vector3[] = [];
@@ -290,10 +315,7 @@ export class Audit {
           vn.fromBufferAttribute(nrm, i0).add(na.fromBufferAttribute(nrm, i1)).add(na.fromBufferAttribute(nrm, i2));
           if (vn.lengthSq() > 1e-6 && fn.dot(vn.normalize()) < -0.9 && area2 > 0.02) flippedAt.push(a.clone().add(b).add(c).divideScalar(3));
         }
-        const key = [a, b, c].map((v) => `${Math.round(v.x * 50)},${Math.round(v.y * 50)},${Math.round(v.z * 50)}`).sort().join('|');
-        const n = seen.get(key) ?? 0;
-        if (n) { dups++; if (dupAt.length < 50) dupAt.push(a.clone().add(b).add(c).divideScalar(3)); }
-        seen.set(key, n + 1);
+        if (isDuplicate(i0, i1, i2)) { dups++; if (dupAt.length < 50) dupAt.push(a.clone().add(b).add(c).divideScalar(3)); }
       }
       const side = (m.material as THREE.MeshStandardMaterial).side;
       // Leaves, cut-outs and glass bend their normals on purpose: only opaque surfaces count
@@ -333,16 +355,14 @@ export class Audit {
       const nrm = g.attributes.normal;
       const idx = g.index!;
       const keep: number[] = [];
-      const seen = new Set<string>();
+      const isDuplicate = duplicateFinder(pos);
       let changed = false;
       const surface = m.userData.surface as { mask?: boolean; blend?: boolean } | undefined;
       const mayFlip = !surface?.mask && !surface?.blend && !seeThrough(m.material as THREE.Material);
       for (let t = 0; t + 2 < idx.count; t += 3) {
         let i0 = idx.getX(t); const i1 = idx.getX(t + 1); let i2 = idx.getX(t + 2);
         a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
-        const key = [a, b, c].map((v) => `${Math.round(v.x * 50)},${Math.round(v.y * 50)},${Math.round(v.z * 50)}`).sort().join('|');
-        if (seen.has(key)) { duplicates++; changed = true; continue; }
-        seen.add(key);
+        if (isDuplicate(i0, i1, i2)) { duplicates++; changed = true; continue; }
         fn.subVectors(c, b).cross(na.subVectors(a, b));
         const area2 = fn.length();
         if (mayFlip && nrm && area2 > 0.02) {
