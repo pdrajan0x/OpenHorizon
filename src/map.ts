@@ -4,6 +4,8 @@
 // rivals, events and the GPS.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import { Markings } from './markings';
+import { surfaceMaterial, surfaceOf } from './roadSurface';
 import type { Corridors } from './corridors';
 import { EFFECTS } from './quality';
 
@@ -27,12 +29,22 @@ const FAR_LOADS_PER_FRAME = 2;
 let lightingSetup: ((m: THREE.MeshStandardMaterial) => void) | null = null;
 const litMaterials = new Set<THREE.MeshStandardMaterial>();
 /** GTA's baked vertex shading: how strongly it darkens, and the night glow of its artificial ambient. */
+/** Maps whose drawn road, pavement, guard rails and lamp posts are made solid as well (their own collision has gaps). */
+const SURFACE_COLLISION_MAPS = /^carla-/;
+const HIDE = (() => { const h = new URLSearchParams(location.search).get('hide'); return h ? new RegExp(h) : null; })();
+const SURFACE_COLLISION = /asphalt|sidewalk|curb|kerb|galvanizediron|concrete_square|streetlight|guardrail/i;
 const shadeUniforms = { uShadeNight: { value: 0 } };
 
 /** Called by the atmosphere: `setup` patches a material for cascaded shadows (null: no shadows). */
 export function setMapLighting(setup: ((m: THREE.MeshStandardMaterial) => void) | null): void {
   lightingSetup = setup;
   if (setup) for (const m of litMaterials) applyLighting(m);
+}
+
+/** A material outside the maps' own (road markings) that should be lit like them: shadows, night. */
+export function litMaterial(m: THREE.MeshStandardMaterial): void {
+  litMaterials.add(m);
+  applyLighting(m);
 }
 
 function applyLighting(m: THREE.MeshStandardMaterial): void {
@@ -226,6 +238,9 @@ export class GameMap {
   readonly root = new THREE.Group();
   readonly roads: RoadGraph;
   readonly roadData: RoadData; // in world space (offset applied), for merging islands' graphs
+  private roadGrid: Map<string, number[]> | null = null;
+  /** Painted lines for a map without its own (markings.ts). */
+  markings: Markings | null = null;
   readonly spawn: THREE.Vector3;
   /** World-space footprint of the render cells. */
   readonly min = new THREE.Vector2(Infinity, Infinity);
@@ -380,7 +395,7 @@ export class GameMap {
           this.dropFar(c.id);
         }
       }
-      if (c.collision) {
+      if (c.collision || (c.render && SURFACE_COLLISION_MAPS.test(this.id))) {
         const near = Math.min(...solid.map((p) => this.distance(c, p)));
         const col = this.colliders.get(c.id);
         if (!col && near < COLLISION_RADIUS) void this.loadCollision(c);
@@ -489,6 +504,11 @@ export class GameMap {
     offset += (4 - (offset % 4)) % 4;
     const group = new THREE.Group();
     for (const b of header.batches) {
+      // ?hide=<shader regex> (testing): leave those batches out
+      if (HIDE && HIDE.test(this.manifest.materials[b.material]?.shader ?? '')) {
+        offset += b.vertices * (b.colors ? 9 : 8) * 4 + b.indices * 4;
+        continue;
+      }
       // 8 floats per vertex, plus GTA's baked vertex shading (RGBA8) when the batch has it
       const stride = b.colors ? 9 : 8;
       const interleaved = new Float32Array(buf, offset, b.vertices * stride);
@@ -502,7 +522,7 @@ export class GameMap {
       offset += b.vertices * stride * 4;
       const raw = new Uint32Array(buf, offset, b.indices);
       offset += b.indices * 4;
-      const index = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset) : raw;
+      const index = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset, undefined, true) : raw;
       if (!index.length) continue;
       const ib = new THREE.InterleavedBuffer(interleaved, stride);
       geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
@@ -511,6 +531,8 @@ export class GameMap {
       geo.setIndex(new THREE.BufferAttribute(index, 1));
       geo.computeBoundingSphere();
       const material = await this.material(b.material, !!b.colors);
+      // A road texture a map uses for its footpaths too: the parts standing kerb-high above the road are footpath
+      if (material.name === 'surface:road') geo.setAttribute('kerb', this.kerbs(interleaved, stride, b.vertices));
       const mesh = new THREE.Mesh(geo, material);
       mesh.matrixAutoUpdate = false;
       // null: an old map without structure/detail tags. Far cells are never culled (already simplified).
@@ -538,17 +560,92 @@ export class GameMap {
     return group;
   }
 
+  /**
+   * Per vertex, 1 where it stands KERB_MIN to KERB_MAX m above the nearest road (within KERB_REACH m of the
+   * road's line): a footpath's top and the kerb's face, drawn as footpath even in a texture made for roads.
+   */
+  private kerbs(v: Float32Array, stride: number, count: number): THREE.BufferAttribute {
+    const KERB_MIN = 0.08;
+    const KERB_MAX = 0.6;
+    const KERB_REACH = 22;
+    const G = 16;
+    if (!this.roadGrid) {
+      // Road links bucketed by G m cells (map frame), each link in every cell its box touches
+      const grid = new Map<string, number[]>();
+      const n = this.roadData.nodes;
+      const o = this.offset;
+      this.roadData.links.forEach(([a, b], k) => {
+        const [x0, z0, x1, z1] = [Math.min(n[a][0], n[b][0]) - o.x, Math.min(n[a][2], n[b][2]) - o.z, Math.max(n[a][0], n[b][0]) - o.x, Math.max(n[a][2], n[b][2]) - o.z];
+        for (let i = Math.floor(x0 / G); i <= Math.floor(x1 / G); i++) for (let j = Math.floor(z0 / G); j <= Math.floor(z1 / G); j++) {
+          const key = `${i},${j}`;
+          const l = grid.get(key);
+          if (l) l.push(k); else grid.set(key, [k]);
+        }
+      });
+      this.roadGrid = grid;
+    }
+    const n = this.roadData.nodes;
+    const o = this.offset;
+    const out = new Float32Array(count);
+    const rel = new Float32Array(count).fill(NaN); // height above the road's line
+    const near: number[] = []; // …of the vertices on it: how far the surface sits off the line (derived lines run a little low)
+    for (let i = 0; i < count; i++) {
+      const x = v[i * stride];
+      const y = v[i * stride + 1];
+      const z = v[i * stride + 2];
+      let best = KERB_REACH;
+      let roadY = NaN;
+      const cx = Math.floor(x / G);
+      const cz = Math.floor(z / G);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+        for (const k of this.roadGrid.get(`${cx + a},${cz + b}`) ?? []) {
+          const [ia, ib] = this.roadData.links[k];
+          const px = n[ia][0] - o.x, py = n[ia][1] - o.y, pz = n[ia][2] - o.z;
+          const dx = n[ib][0] - o.x - px, dy = n[ib][1] - o.y - py, dz = n[ib][2] - o.z - pz;
+          const t = Math.max(0, Math.min(1, ((x - px) * dx + (z - pz) * dz) / (dx * dx + dz * dz || 1)));
+          const d = Math.hypot(px + dx * t - x, pz + dz * t - z);
+          if (d < best) { best = d; roadY = py + dy * t; }
+        }
+      }
+      rel[i] = y - roadY;
+      if (best < 2.5) near.push(rel[i]);
+    }
+    near.sort((a, b) => a - b);
+    const bias = near.length >= 3 ? near[near.length >> 1] : 0;
+    for (let i = 0; i < count; i++) {
+      const above = rel[i] - bias;
+      out[i] = above >= KERB_MIN && above <= KERB_MAX ? 1 : 0;
+    }
+    return new THREE.BufferAttribute(out, 1);
+  }
+
   private async loadCollision(c: CellInfo): Promise<void> {
     if (this.colliders.has(c.id)) return;
     this.colliders.set(c.id, 'loading');
-    const buf = await download(`${this.base}/col/${c.id}.bin`);
+    // A cell with nothing solid of its own (collision false) may still have road to make solid
+    const buf = c.collision ? await download(`${this.base}/col/${c.id}.bin`) : new ArrayBuffer(8);
     if (!buf) return;
     const view = new DataView(buf);
     const vertices = view.getUint32(0, true);
     const indices = view.getUint32(4, true);
-    const pos = new Float32Array(buf, 8, vertices * 3);
-    const idx = this.corridors ? this.corridors.cut(pos, 3, new Uint32Array(buf, 8 + vertices * 12, indices), this.offset)
-      : new Uint32Array(buf, 8 + vertices * 12, indices);
+    let pos = new Float32Array(buf, 8, vertices * 3);
+    let raw = new Uint32Array(buf, 8 + vertices * 12, indices);
+    // CARLA's towns lack collision on stretches of road, pavement, guard rail and lamp posts: those surfaces
+    // as drawn are made solid too (where there was collision already they coincide with it)
+    if (SURFACE_COLLISION_MAPS.test(this.id) && c.render) {
+      const extra = await this.surfaceTriangles(c);
+      if (extra) {
+        const p2 = new Float32Array(pos.length + extra.pos.length);
+        p2.set(pos);
+        p2.set(extra.pos, pos.length);
+        const i2 = new Uint32Array(raw.length + extra.idx.length);
+        i2.set(raw);
+        for (let k = 0; k < extra.idx.length; k++) i2[raw.length + k] = extra.idx[k] + vertices;
+        pos = p2;
+        raw = i2;
+      }
+    }
+    const idx = this.corridors ? this.corridors.cut(pos, 3, raw, this.offset) : raw;
     if (!idx.length) {
       this.colliders.set(c.id, 'none');
       return;
@@ -557,6 +654,34 @@ export class GameMap {
       .setTranslation(this.offset.x, this.offset.y, this.offset.z);
     const collider = this.world.createCollider(desc);
     this.colliders.set(c.id, collider);
+  }
+
+  /** From a cell's render file, the triangles of its surfaces that must be solid (SURFACE_COLLISION), as positions + indices. */
+  private async surfaceTriangles(c: CellInfo): Promise<{ pos: Float32Array; idx: Uint32Array } | null> {
+    const buf = await download(`${this.base}/cells/${c.id}.bin`);
+    if (!buf) return null;
+    const view = new DataView(buf);
+    const jsonLength = view.getUint32(0, true);
+    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
+      batches: { material: number; vertices: number; indices: number; colors?: boolean }[];
+    };
+    let offset = 4 + jsonLength;
+    offset += (4 - (offset % 4)) % 4;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (const b of header.batches) {
+      const stride = b.colors ? 9 : 8;
+      const v = new Float32Array(buf, offset, b.vertices * stride);
+      offset += b.vertices * stride * 4;
+      const ix = new Uint32Array(buf, offset, b.indices);
+      offset += b.indices * 4;
+      const m = this.manifest.materials[b.material];
+      if (!m?.diffuse || !SURFACE_COLLISION.test(m.diffuse) || m.blend) continue;
+      const base = pos.length / 3;
+      for (let i = 0; i < b.vertices; i++) pos.push(v[i * stride], v[i * stride + 1], v[i * stride + 2]);
+      for (let k = 0; k < ix.length; k++) idx.push(ix[k] + base);
+    }
+    return idx.length ? { pos: new Float32Array(pos), idx: new Uint32Array(idx) } : null;
   }
 
   /** The material for a manifest entry; `shaded` for batches carrying GTA's vertex shading. */
@@ -572,6 +697,14 @@ export class GameMap {
 
   private async makeMaterial(i: number, shaded: boolean): Promise<THREE.Material> {
     const m = this.manifest.materials[i];
+    // The city's roads and footpaths: the shared materials (roadSurface.ts), not the map's own
+    const surface = await surfaceOf(this.id, m.diffuse);
+    if (surface) {
+      const mat = await surfaceMaterial(surface, m.diffuse ? await this.texture(m.diffuse, true) : null, this.id);
+      litMaterials.add(mat);
+      applyLighting(mat);
+      return mat;
+    }
     const [map, normalMap, specMap, detail] = await Promise.all([
       m.diffuse ? this.texture(m.diffuse, true) : null,
       m.normal ? this.texture(m.normal, false) : null,

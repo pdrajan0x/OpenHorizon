@@ -16,6 +16,8 @@
 //   E missing piece        at a road: neither visible ground nor collision (nothing there at all)
 //   A rendering            the surface exists but isn't drawn there: hidden by distance culling
 //
+// Structures with nothing under them (a building missing its lower storeys) and surfaces drawn without a
+// texture (blank white walls) are reported too.
 // Each render mesh's own geometry is checked too: triangles wound against their stored normals (drawn
 // from the wrong side, so a wall vanishes from the front), exact duplicate triangles (z-fighting) and
 // degenerate ones. fix() repairs only the first two, and only where it's unambiguous. Findings are
@@ -58,6 +60,8 @@ const PITCH_DOWN = 0.35; // rad: the angled-down rays
 const TOLERANCE = 1.2; // m: render and collision surfaces this close are the same surface
 const CLUSTER = 6; // m: ray findings closer than this are one issue
 const MESH_CLUSTER = 25; // m: the same for triangles found by the mesh checks
+/** ?auditTextures: also report surfaces drawn without a texture (off by default: geometry first). */
+const TEXTURES = typeof location !== 'undefined' && new URLSearchParams(location.search).has('auditTextures');
 const MARK_COLOURS: Record<IssueKind, number> = { A: 0x4da3ff, B: 0xff8c1a, C: 0xff2a2a, D: 0xd43cff, E: 0xffe600 };
 
 interface RenderHit {
@@ -129,6 +133,7 @@ export class Audit {
   private panel: HTMLDivElement | null = null;
   private nextId = 1;
   private readonly checkedMeshes = new WeakSet<THREE.BufferGeometry>();
+  private readonly floatChecked = new WeakSet<THREE.BufferGeometry>();
   private readonly clusters = new Map<string, Issue>();
   /** Rays cast and sample points taken, for the report. */
   stats = { points: 0, rays: 0, meshesChecked: 0, trianglesChecked: 0, places: 0 };
@@ -291,6 +296,12 @@ export class Audit {
       this.report('A', 'surface hidden by distance culling', r.point, r.object,
         'The surface exists and faces the viewer but its batch is hidden at this distance (detail culling), so the view passes through where it should be.', 'medium', [from, r.point]);
     }
+    const mat = r?.material as THREE.MeshStandardMaterial | undefined;
+    if (TEXTURES && r && r.frontFacing && r.drawn && r.distance < 60 && mat && !mat.map && !seeThrough(mat) && !(mat.emissiveMap || (mat.emissive && mat.emissive.getHex()))) {
+      this.report('A', 'surface with no texture (plain white or grey)', r.point, r.object,
+        "The surface is drawn without its texture (the mod's texture wasn't found or couldn't be converted): a blank white or grey wall or ground.",
+        r.distance < 25 ? 'medium' : 'low', [from, r.point], MESH_CLUSTER);
+    }
     const nearRoad = from.y - roadY < 2;
     if (c && (!r || r.distance > c.distance + TOLERANCE) && c.distance < 30) {
       this.report('C', 'invisible wall (collision with nothing drawn)', c.point, r?.object ?? null,
@@ -364,6 +375,77 @@ export class Audit {
   }
 
   /**
+   * Floating structures: each render mesh within RADIUS is split into pieces (triangles joined by shared
+   * corners, welded by position), and a piece that stands FLOAT_TALL m or more, is building-sized, and has
+   * nothing under its lowest corners (no visible surface and no collision within FLOAT_GAP m) is reported:
+   * a building whose lower storeys are gone, a wall hanging in the air. Foliage and glass don't count.
+   */
+  private checkFloating(meshes: THREE.Mesh[], at: THREE.Vector3): void {
+    const FLOAT_TALL = 8;
+    const FLOAT_GAP = 4;
+    const v = new THREE.Vector3();
+    const down = new THREE.Vector3(0, -1, 0);
+    for (const m of meshes) {
+      if ((m as THREE.InstancedMesh).isInstancedMesh || this.floatChecked.has(m.geometry)) continue;
+      const surface = m.userData.surface as { mask?: boolean; blend?: boolean } | undefined;
+      if (surface?.mask || surface?.blend || seeThrough(m.material as THREE.Material)) continue;
+      const g = m.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      const centre = g.boundingSphere!.center.clone().applyMatrix4(m.matrixWorld);
+      if (Math.hypot(centre.x - at.x, centre.z - at.z) > RADIUS + g.boundingSphere!.radius) continue;
+      this.floatChecked.add(g);
+      const pos = g.attributes.position;
+      const idx = g.index!;
+      const tris = Math.floor(idx.count / 3);
+      const parent = new Int32Array(tris).map((_, i) => i);
+      const find = (i: number): number => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+      const corner = new Map<number, number>();
+      for (let t = 0; t < tris; t++) {
+        for (let k = 0; k < 3; k++) {
+          const i = idx.getX(t * 3 + k);
+          const key = Math.round(pos.getX(i) * 10) * 73856093 ^ Math.round(pos.getY(i) * 10) * 19349663 ^ Math.round(pos.getZ(i) * 10) * 83492791;
+          const other = corner.get(key);
+          if (other === undefined) corner.set(key, t); else parent[find(t)] = find(other);
+        }
+      }
+      const pieces = new Map<number, { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; low: number }>();
+      for (let t = 0; t < tris; t++) {
+        const r = find(t);
+        let p = pieces.get(r);
+        if (!p) pieces.set(r, (p = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, z0: Infinity, z1: -Infinity, low: -1 }));
+        for (let k = 0; k < 3; k++) {
+          const i = idx.getX(t * 3 + k);
+          const y = pos.getY(i);
+          if (y < p.y0) { p.y0 = y; p.low = i; }
+          p.y1 = Math.max(p.y1, y);
+          p.x0 = Math.min(p.x0, pos.getX(i)); p.x1 = Math.max(p.x1, pos.getX(i));
+          p.z0 = Math.min(p.z0, pos.getZ(i)); p.z1 = Math.max(p.z1, pos.getZ(i));
+        }
+      }
+      for (const p of pieces.values()) {
+        const w = Math.max(p.x1 - p.x0, p.z1 - p.z0);
+        if (p.y1 - p.y0 < FLOAT_TALL || w < 6 || w > 150) continue;
+        // Under its lowest corner, and under the middle of its footprint at that height
+        const probes = [
+          v.fromBufferAttribute(pos, p.low).applyMatrix4(m.matrixWorld).clone(),
+          new THREE.Vector3((p.x0 + p.x1) / 2, p.y0, (p.z0 + p.z1) / 2).applyMatrix4(m.matrixWorld),
+        ];
+        const floating = probes.every((q) => {
+          const from = q.clone().add(new THREE.Vector3(0, -0.3, 0));
+          const c = this.castCollision(from, down, FLOAT_GAP);
+          const r = this.castRender(meshes, from, down, FLOAT_GAP);
+          return !c && !r;
+        });
+        if (floating) {
+          this.report('B', 'floating structure (nothing under it)', probes[0], m,
+            `A piece ${(p.y1 - p.y0).toFixed(0)} m tall and ${w.toFixed(0)} m across has nothing under its base for ${FLOAT_GAP} m or more, neither drawn nor solid: a building missing its lower storeys, or a wall hanging in the air.`,
+            'high', [probes[0], probes[0].clone().addScaledVector(down, FLOAT_GAP)], MESH_CLUSTER);
+        }
+      }
+    }
+  }
+
+  /**
    * Safe repairs only: triangles clearly wound against their normals get their winding turned round, and
    * exact duplicate triangles are dropped. Everything else is only reported.
    */
@@ -413,6 +495,7 @@ export class Audit {
     const meshes = this.targets();
     this.ensureBvh(meshes);
     this.checkMeshes(meshes);
+    this.checkFloating(meshes, at);
     // Sample points: road nodes near the point, thinned to one per NODE_SPACING m
     const taken: THREE.Vector3[] = [];
     for (const n of this.roadNodes()) {

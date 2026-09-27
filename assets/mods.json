@@ -1481,7 +1481,11 @@
     "author": "IceMove",
     "pageUrl": "https://www.gta5-mods.com/maps/pinecrest-add-on-sp-fivem",
     "fileUrl": "https://files.gta5-mods.com/uploads/pinecrest-add-on-sp-fivem/633af4-pinecrest.7z",
-    "extraFiles": [{ "url": "https://files.gta5-mods.com/uploads/pinecrest-add-on-sp-fivem/d5b28a-pinecrestcity.zip" }],
+    "extraFiles": [
+      {
+        "url": "https://files.gta5-mods.com/uploads/pinecrest-add-on-sp-fivem/d5b28a-pinecrestcity.zip"
+      }
+    ],
     "format": "mixed",
     "files": [],
     "hasLoose": false,
@@ -1512,6 +1516,18 @@
     "format": "Unreal Engine 4.26 packaged build (loose cooked .uasset/.umap), tar.gz; OpenDRIVE road networks",
     "notes": "CC BY assets. Two 10x10 km large maps (36 and 48 tiles of 2 km): high-rise downtowns, apartment districts, suburbs, highways, farmland. Converted with tools/ueconv (CUE4Parse), roads from the .xodr files. Not fetched by fetch-mods.mjs (16 GB): see scripts/setup.sh.",
     "archiveBytes": 15800000000,
+    "downloaded": true
+  },
+  {
+    "id": "road-roads-of-europe",
+    "category": "road",
+    "title": "Roads of Europe: Definitive Edition - Street Retexture",
+    "author": "Mouhzanfarydeh",
+    "pageUrl": "https://www.gta5-mods.com/maps/roads-of-europe",
+    "fileUrl": "https://www.mediafire.com/file/bu0uxfndpi5d6ru/Roads+of+Europe+-+Definitive+Edition+-+Singleplayer.rar/file",
+    "format": "GTA V dlc.rpf (ytd), rar",
+    "notes": "Rating 4.69 (67 votes). Photo-scanned European (Berlin) asphalt and footpath slabs: every city's roads and footpaths (src/roadSurface.ts).",
+    "archiveBytes": 1860953769,
     "downloaded": true
   }
 ]

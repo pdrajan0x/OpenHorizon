@@ -50,6 +50,7 @@ const NAV_CREST = 240; // m level at the top
 const NAV_GRADE = 0.045; // the steepest grade on the way up to it
 const FLOOR_REACH = 40; // m either side: over land the deck stays above the highest ground this near
 const CLIMB_COST = 80; // route cost per m that the land along it rises above both its ends (per 40 m sample)
+const OBSTACLE_COST = 500; // route cost per 20 m of its approach through something taller than the deck can clear
 // Structure
 const GIRDER_DEPTH = 2.6; // m from the road surface to the underside of the box girder
 const SLAB_EDGE = 0.5; // m: the deck slab's edge (the fascia under the barrier)
@@ -60,7 +61,7 @@ const EMBANK_MAX = 260; // m …or this far out
 const EMBANK_FOOT = -6; // m: where the embankment meets the seabed
 const EMBANK_SLOPE = 1.5; // m out per m down
 const HIGH_OVER_LAND = 8; // m: a deck higher than this over land stands on piers, lower on the ground
-const CUT_MAX = 9; // m: the highest a cut slope rises beside the road (above it, corridors.ts leaves things be)
+const FILL_FROM = 1.5; // m: a deck this high over land or more has rock slopes down to the ground
 const SPAN = 50; // m between piers
 const FOOTING_TOP = 1.2; // m: a pier's footing stands this far out of the water
 const SEABED = -18; // m, where piers end
@@ -296,16 +297,22 @@ export function planLinks(
           // …and above all how high that land rises over both ends: the deck would have to climb over it
           let land = 0;
           let climb = 0;
+          let blocks = 0;
           const over = Math.max(pa.y, pb.y) + 3;
-          for (let t = 0; t <= 1; t += 40 / l.length) {
+          for (let t = 0; t <= 1; t += 20 / l.length) {
             const x = pa.x + (pb.x - pa.x) * t;
             const z = pa.z + (pb.z - pa.z) * t;
             const k = landAt(x, z);
             if (k !== a && k !== b) continue;
-            land += 40;
-            climb += Math.max(0, ground(x, z) - over);
+            land += 20;
+            climb += Math.max(0, ground(x, z) - over) / 2;
+            // Anything standing above the most the deck could have climbed to here (a building, a hillside):
+            // the approach would cut its lower storeys away and leave the rest standing on nothing
+            const reach = Math.min(pa.y + MAX_GRADE * t * l.length, pb.y + MAX_GRADE * (1 - t) * l.length) + 3;
+            const r = new THREE.Vector2(pb.z - pa.z, pa.x - pb.x).normalize().multiplyScalar(DECK_WIDTH / 2 + 3);
+            if ([0, 1, -1].some((side) => (islands[k].top?.(x + r.x * side, z + r.y * side) ?? -Infinity) > reach)) blocks++;
           }
-          l.cost += landCost * Math.max(0, land - l.shore) + CLIMB_COST * climb;
+          l.cost += landCost * Math.max(0, land - l.shore) + CLIMB_COST * climb + OBSTACLE_COST * blocks;
         }
         top.sort((p, q) => p.cost - q.cost);
         top.length = Math.min(top.length, CANDIDATES);
@@ -421,16 +428,18 @@ const smooth = (x: number) => { const c = THREE.MathUtils.clamp(x, 0, 1); return
 interface Bend {
   shape: 'bow' | 's';
   amp: number;
+  /** Where along the link (0–1) it bends: over the water. */
+  span?: [number, number];
 }
 const STRAIGHT: Bend = { shape: 'bow', amp: 0 };
 const S_PEAK = 0.6495; // the most of sin(2πt)·sin²(πt), at t = 1/3
 
 /**
  * The deck's plan from A to B, finely sampled: a Hermite curve leaving A along `da` and arriving at B along
- * `db`, plus the bend across the chord. The bend is zero, with zero slope, at both ends, so each end still
- * leaves along its road.
+ * `db`, plus the bend across the chord over `span` (the part of the curve over water, 0–1). The bend is zero,
+ * with zero slope, where it starts and ends, so each end still leaves along its road.
  */
-function planCurve(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2, bend: Bend): THREE.Vector2[] {
+function planCurve(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2, bend: Bend, span: [number, number] = [0, 1]): THREE.Vector2[] {
   const L = Math.hypot(pb.x - pa.x, pb.z - pa.z);
   const m = L * 0.75;
   const N = Math.max(60, Math.ceil(L / 3));
@@ -443,8 +452,10 @@ function planCurve(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: 
     const h10 = t ** 3 - 2 * t ** 2 + t;
     const h01 = -2 * t ** 3 + 3 * t ** 2;
     const h11 = t ** 3 - t ** 2;
-    const s2 = Math.sin(Math.PI * t) ** 2;
-    const b = bend.amp * (bend.shape === 'bow' ? s2 : (Math.sin(2 * Math.PI * t) * s2) / S_PEAK);
+    // Only over the water (`span`): on land the deck keeps to its street's line, not through the blocks beside it
+    const u = THREE.MathUtils.clamp((t - span[0]) / Math.max(1e-6, span[1] - span[0]), 0, 1);
+    const s2 = Math.sin(Math.PI * u) ** 2;
+    const b = bend.amp * (bend.shape === 'bow' ? s2 : (Math.sin(2 * Math.PI * u) * s2) / S_PEAK);
     out.push(new THREE.Vector2(
       h00 * pa.x + h10 * m * da.x + h01 * pb.x + h11 * m * db.x + nx * b,
       h00 * pa.z + h10 * m * da.y + h01 * pb.z + h11 * m * db.y + nz * b,
@@ -524,8 +535,9 @@ function chooseBend(
 ): Bend {
   const L = Math.hypot(pb.x - pa.x, pb.z - pa.z);
   const STEP_M = 10;
+  const span = waterSpan(pa, da, pb, db, a, b, landAt);
   const judge = (bend: Bend) => {
-    const { pts, length } = resample(planCurve(pa, da, pb, db, bend), STEP_M);
+    const { pts, length } = resample(planCurve(pa, da, pb, db, bend, span), STEP_M);
     let own = 0;
     let third = false;
     if (landAt) {
@@ -548,10 +560,24 @@ function chooseBend(
       const [shape, side] = shapes[(seed + j) % shapes.length];
       const bend = { shape, amp: side * amp };
       const v = judge(bend);
-      if (!v.third && !v.near && v.r >= Math.min(MIN_RADIUS, straight.r * 0.9) && v.own <= straight.own + 80) return bend;
+      if (!v.third && !v.near && v.r >= Math.min(MIN_RADIUS, straight.r * 0.9) && v.own <= straight.own + 80) return { ...bend, span };
     }
   }
-  return STRAIGHT;
+  return { ...STRAIGHT, span };
+}
+
+/** The part of a link's straight version (0–1 along it) between leaving its own island A and reaching B. */
+function waterSpan(
+  pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2,
+  a: number, b: number, landAt: ((x: number, z: number) => number) | undefined,
+): [number, number] {
+  if (!landAt) return [0, 1];
+  const line = planCurve(pa, da, pb, db, STRAIGHT);
+  let i0 = 0;
+  while (i0 < line.length - 1 && landAt(line[i0].x, line[i0].y) === a) i0++;
+  let i1 = line.length - 1;
+  while (i1 > i0 && landAt(line[i1].x, line[i1].y) === b) i1--;
+  return [i0 / (line.length - 1), i1 / (line.length - 1)];
 }
 
 /**
@@ -565,7 +591,7 @@ function centerline(
   pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2, halfA: number, halfB: number,
   bend: Bend, sea: (x: number, z: number) => boolean, ground: (x: number, z: number) => number,
 ): Frame[] {
-  const { pts, length: S } = resample(planCurve(pa, da, pb, db, bend), STEP);
+  const { pts, length: S } = resample(planCurve(pa, da, pb, db, bend, bend.span), STEP);
   const n = pts.length - 1;
   const sAt = (i: number) => (S * i) / n;
   // The longest stretch of open water: the navigation span goes over its middle
@@ -594,6 +620,9 @@ function centerline(
   // enough to meet it at a grade a car can take, not a step where the land begins
   for (let i = 1; i <= n; i++) floor[i] = Math.max(floor[i], floor[i - 1] - MAX_GRADE * STEP);
   for (let i = n - 1; i >= 0; i--) floor[i] = Math.max(floor[i], floor[i + 1] - MAX_GRADE * STEP);
+  // Never above what the deck can climb to from either end's road at MAX_GRADE: each end meets its street
+  // level (ground higher than that beside the join is cut back; the cut slopes close it)
+  for (let i = 0; i <= n; i++) floor[i] = Math.min(floor[i], ha + MAX_GRADE * sAt(i), hb + MAX_GRADE * (S - sAt(i)));
   let ys = pts.map((_, i) => {
     const s = sAt(i);
     let target = Math.max(DECK_CLEARANCE, ha + ((hb - ha) * s) / S);
@@ -601,7 +630,7 @@ function centerline(
     const lo = Math.max(ha - MAX_GRADE * s, hb - MAX_GRADE * (S - s));
     const hi = Math.min(ha + MAX_GRADE * s, hb + MAX_GRADE * (S - s));
     const y = lo > hi ? ha + ((hb - ha) * s) / S : THREE.MathUtils.clamp(target, lo, hi);
-    return Math.max(y, floor[i]);
+    return i === 0 ? ha : i === n ? hb : Math.max(y, floor[i]);
   });
   // Vertical curves: a running mean over ±60 m, a few times (never past the ends, which stay on their
   // roads), each time lifted back off the floor
@@ -720,16 +749,37 @@ function octagon(a: number, x: number, c: number): [number, number][] {
 /**
  * The height of the ground at a point on an island (world m), −∞ over the sea or where it isn't known: the
  * lowest of the tallest-thing heights (IslandPlan.top) in the 20 m cells round it, so a lone building or
- * tree doesn't count as ground.
+ * tree doesn't count as ground, and no higher than the streets nearby (in a city, roofs are everywhere).
  */
 function groundAt(islands: IslandPlan[], landAt?: (x: number, z: number) => number): (x: number, z: number) => number {
+  // In a city every 20 m cell has a roof in it: there the ground is the streets. The lowest road within
+  // ROAD_CELL m either way, per island, bucketed
+  const ROAD_CELL = 75;
+  const streets = new Map<number, Map<string, number>>();
+  const streetsOf = (k: number) => {
+    let m = streets.get(k);
+    if (m) return m;
+    m = new Map();
+    for (const p of islands[k].nodes) {
+      const key = `${Math.floor(p.x / ROAD_CELL)},${Math.floor(p.z / ROAD_CELL)}`;
+      m.set(key, Math.min(m.get(key) ?? Infinity, p.y));
+    }
+    streets.set(k, m);
+    return m;
+  };
   return (x, z) => {
     const k = landAt ? landAt(x, z) : -1;
-    const top = k >= 0 ? islands[k].top : undefined;
-    if (!top) return -Infinity;
+    if (k < 0) return -Infinity;
+    const m = streetsOf(k);
+    const cx = Math.floor(x / ROAD_CELL);
+    const cz = Math.floor(z / ROAD_CELL);
+    let road = Infinity;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) road = Math.min(road, m.get(`${cx + i},${cz + j}`) ?? Infinity);
+    const top = islands[k].top;
+    if (!top) return Number.isFinite(road) ? road : -Infinity;
     let low = Infinity;
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) low = Math.min(low, top(x + i * 20, z + j * 20));
-    return low;
+    return Math.min(low, road);
   };
 }
 
@@ -921,16 +971,18 @@ export class BridgeNetwork {
       return ground(o.x, o.z);
     };
     const wet = frames.map((f) => sea(f.p.x, f.p.z));
-    type Kind = 'land' | 'embank' | 'piers';
+    type Kind = 'ground' | 'land' | 'embank' | 'piers';
     const kind: Kind[] = frames.map((f, i) => {
       if (wet[i]) return 'piers';
       const g = Math.min(ground(f.p.x, f.p.z), beside(f, -1), beside(f, 1));
-      return !Number.isFinite(g) || f.p.y - g <= HIGH_OVER_LAND ? 'land' : 'piers';
+      if (!Number.isFinite(g)) return 'ground';
+      const above = f.p.y - g;
+      return above > HIGH_OVER_LAND ? 'piers' : above > FILL_FROM ? 'land' : 'ground';
     });
     // Embankments: from where each end's land gives way to water
     for (const [from, dir] of [[0, 1], [last, -1]] as const) {
       let i = from;
-      while (i >= 0 && i <= last && kind[i] === 'land') i += dir;
+      while (i >= 0 && i <= last && (kind[i] === 'land' || kind[i] === 'ground')) i += dir;
       const shore = i;
       while (i >= 0 && i <= last && wet[i] && kind[i] === 'piers' && frames[i].p.y <= EMBANK_TOP
         && Math.abs(frames[i].s - frames[Math.min(last, Math.max(0, shore))].s) <= EMBANK_MAX) {
@@ -997,15 +1049,13 @@ export class BridgeNetwork {
       }
       this.instances(armour, stones, true);
     };
-    // Rock from the deck's edge to the ground beside it: down into it at EMBANK_SLOPE where the deck is
-    // higher, up into it (1:1, at most CUT_MAX m) where the deck is lower; both 2 m past the ground, so the
-    // two meet the ground's own surface whatever its bumps
+    // Where the deck stands clear of the ground: rock from its edge down into the ground at EMBANK_SLOPE,
+    // 2 m past it so the two meet whatever the ground's bumps (where it's at ground level, the ground and
+    // the city's own streets meet it: nothing is built over them)
     const shoulder = (f: Frame, side: number): [number, number][] => {
       const gnd = beside(f, side);
-      const g = Number.isFinite(gnd) ? gnd - f.p.y : -3;
-      const y = THREE.MathUtils.clamp(g - 2 + 3.5 * THREE.MathUtils.clamp(g, 0, 1), -HIGH_OVER_LAND - 2, CUT_MAX);
-      const x = f.hw + (y < 0 ? EMBANK_SLOPE : 1) * Math.abs(y);
-      return [[side * f.hw, -0.05], [side * x, y]];
+      const drop = Math.min(HIGH_OVER_LAND, Number.isFinite(gnd) ? f.p.y - gnd : FILL_FROM) + 2;
+      return [[side * f.hw, -0.05], [side * (f.hw + EMBANK_SLOPE * drop), -drop]];
     };
     for (const r of runs) {
       // One frame into the next run where that's land too, so the two slopes meet (not into piers: an

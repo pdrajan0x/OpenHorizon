@@ -2,12 +2,15 @@
 // expressway sound walls, fences, embankments, the odd building. A corridor is the deck's centreline
 // (road-surface points) with a half width. Any triangle overlapping it that rises more than CLEAR_BELOW
 // above that road and starts below CLEAR_ABOVE is dropped, from the render cells and the collision
-// alike, so nothing solid or invisible stands between a city's streets and its bridges.
+// alike, so nothing solid or invisible stands between a city's streets and its bridges. A building cut
+// into goes whole, not just its lower storeys.
 import type * as THREE from 'three';
 
 const CLEAR_BELOW = 0.35; // m above the road: the road itself and kerbs stay
 const CLEAR_ABOVE = 9; // m above the road: flyovers and gantries over it stay
 const JOINT = 3; // m each segment reaches past its ends, closing the gaps at bends
+const BUILDING_MAX = 150; // m across at most for a piece cut into to go whole (wider: ground, a block's mesh)
+// (only in what's drawn, and never a piece with 40 m² or more of level surface at the road's height: ground)
 
 interface Seg {
   ax: number; ay: number; az: number;
@@ -66,7 +69,7 @@ export class Corridors {
    * stay. Returns the same index when nothing is cut.
    */
   cut<T extends Uint32Array | number[]>(
-    pos: ArrayLike<number>, stride: number, index: T, off: { x: number; y: number; z: number }, below = CLEAR_BELOW,
+    pos: ArrayLike<number>, stride: number, index: T, off: { x: number; y: number; z: number }, below = CLEAR_BELOW, whole = false,
   ): T {
     if (!this.segs.length || !index.length) return index;
     // Bounds of the geometry first: most cells are nowhere near a bridge
@@ -81,7 +84,8 @@ export class Corridors {
     }
     const segs = this.near(minX + off.x, minZ + off.z, maxX + off.x, maxZ + off.z);
     if (!segs.length) return index;
-    const keep: number[] = [];
+    const tris = index.length / 3;
+    const dropped = new Uint8Array(tris);
     let cut = 0;
     const px = [0, 0, 0];
     const pz = [0, 0, 0];
@@ -97,14 +101,83 @@ export class Corridors {
         if (y > yMax) yMax = y;
       }
       if (hits(segs, px, pz, yMin, yMax, below)) {
+        dropped[i / 3] = 1;
         cut++;
-        continue;
       }
-      keep.push(index[i], index[i + 1], index[i + 2]);
     }
     if (!cut) return index;
+    if (whole) wholeBuildings(pos, stride, index, off, dropped, segs);
+    const keep: number[] = [];
+    for (let t = 0; t < tris; t++) if (!dropped[t]) keep.push(index[t * 3], index[t * 3 + 1], index[t * 3 + 2]);
     return (index instanceof Uint32Array ? new Uint32Array(keep) : keep) as T;
   }
+}
+
+/**
+ * A building the corridor cut into goes whole: its lower storeys cut away, the rest would hang in the air.
+ * Triangles are grouped into pieces by shared corners (welded by position: a wall's faces often don't
+ * share vertices), and a piece that lost triangles, still stands higher than CLEAR_ABOVE and is no wider
+ * than BUILDING_MAX m (the ground, or a whole block's mesh, is left be) is dropped altogether.
+ */
+function wholeBuildings(pos: ArrayLike<number>, stride: number, index: ArrayLike<number>, off: { x: number; y: number; z: number }, dropped: Uint8Array, segs: Seg[]): void {
+  const tris = dropped.length;
+  const parent = new Int32Array(tris).map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  const corner = new Map<string, number>();
+  for (let t = 0; t < tris; t++) {
+    for (let k = 0; k < 3; k++) {
+      const v = index[t * 3 + k] * stride;
+      const key = `${Math.round(pos[v] * 20)},${Math.round(pos[v + 1] * 20)},${Math.round(pos[v + 2] * 20)}`;
+      const other = corner.get(key);
+      if (other === undefined) corner.set(key, t);
+      else parent[find(t)] = find(other);
+    }
+  }
+  const pieces = new Map<number, { cut: boolean; x0: number; x1: number; z0: number; z1: number; y0: number; y1: number }>();
+  for (let t = 0; t < tris; t++) {
+    const r = find(t);
+    let p = pieces.get(r);
+    if (!p) pieces.set(r, (p = { cut: false, x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity, y0: Infinity, y1: -Infinity }));
+    if (dropped[t]) p.cut = true;
+    for (let k = 0; k < 3; k++) {
+      const v = index[t * 3 + k] * stride;
+      p.x0 = Math.min(p.x0, pos[v]); p.x1 = Math.max(p.x1, pos[v]);
+      p.z0 = Math.min(p.z0, pos[v + 2]); p.z1 = Math.max(p.z1, pos[v + 2]);
+      p.y0 = Math.min(p.y0, pos[v + 1] + off.y); p.y1 = Math.max(p.y1, pos[v + 1] + off.y);
+    }
+  }
+  const gone = new Set<number>();
+  for (const [r, p] of pieces) {
+    if (p.cut && p.y1 - p.y0 > CLEAR_ABOVE && p.x1 - p.x0 <= BUILDING_MAX && p.z1 - p.z0 <= BUILDING_MAX) gone.add(r);
+  }
+  if (!gone.size) return;
+  // Never ground: a piece with level surface at the road's height (a street, a plaza, a footpath) stays, only cut
+  const ground = new Map<number, number>();
+  const a = [0, 0, 0];
+  for (let t = 0; t < tris; t++) {
+    const r = find(t);
+    if (!gone.has(r)) continue;
+    const v = [0, 1, 2].map((k) => index[t * 3 + k] * stride);
+    const ux = pos[v[1]] - pos[v[0]], uy = pos[v[1] + 1] - pos[v[0] + 1], uz = pos[v[1] + 2] - pos[v[0] + 2];
+    const wx = pos[v[2]] - pos[v[0]], wy = pos[v[2] + 1] - pos[v[0] + 1], wz = pos[v[2] + 2] - pos[v[0] + 2];
+    a[0] = uy * wz - uz * wy; a[1] = uz * wx - ux * wz; a[2] = ux * wy - uy * wx;
+    const area2 = Math.hypot(a[0], a[1], a[2]);
+    if (area2 < 1e-6 || Math.abs(a[1]) / area2 < 0.85) continue; // not level
+    const cx = (pos[v[0]] + pos[v[1]] + pos[v[2]]) / 3 + off.x;
+    const cy = (pos[v[0] + 1] + pos[v[1] + 1] + pos[v[2] + 1]) / 3 + off.y;
+    const cz = (pos[v[0] + 2] + pos[v[1] + 2] + pos[v[2] + 2]) / 3 + off.z;
+    for (const s of segs) {
+      const u = (cx - s.ax) * s.ux + (cz - s.az) * s.uz;
+      if (u < -60 || u > s.len + 60) continue;
+      const floor = s.ay + (s.by - s.ay) * Math.min(1, Math.max(0, u / s.len));
+      if (Math.abs(cy - floor) < 1.5) { ground.set(r, (ground.get(r) ?? 0) + area2 / 2); break; }
+    }
+  }
+  for (const [r, area] of ground) if (area > 40) gone.delete(r);
+  if (gone.size) for (let t = 0; t < tris; t++) if (gone.has(find(t))) dropped[t] = 1;
 }
 
 /** Whether a triangle (xz corners, y range) overlaps any segment's strip above its road. */

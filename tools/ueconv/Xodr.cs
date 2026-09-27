@@ -178,8 +178,161 @@ static class Xodr
         return new Graph(nodes, links, km);
     }
 
+    /** One painted line: white or yellow, its width, solid or broken (one line or two side by side), and its path. */
+    public record Mark(bool Yellow, double Width, string Type, List<(double x, double y, double z)> Pts, double Dash = 3, double Gap = 6);
+
+    /** A painted patch: a stop bar, a give-way triangle, a zebra stripe (its corners, in order). */
+    public record Patch(bool Yellow, List<(double x, double y, double z)> Corners);
+
+    /**
+     * The network's road markings (OpenDRIVE roadMark): along each lane's outer edge, and the centre line,
+     * wherever a mark is given, traced from the reference line, its lane offset and the lane widths, sampled
+     * every metre and simplified to within 5 cm.
+     */
+    public static (List<Mark> marks, List<Patch> patches) Markings(string path, Func<(double x, double y, double z), (double x, double y, double z)> toGame)
+    {
+        var doc = XDocument.Load(path);
+        var marks = new List<Mark>();
+        var patches = new List<Patch>();
+        foreach (var road in doc.Root!.Elements("road"))
+        {
+            double length = D(road, "length");
+            if (length < 0.5) continue;
+            var geoms = road.Element("planView")!.Elements("geometry")
+                .Select(g => new Geometry(D(g, "s"), D(g, "x"), D(g, "y"), D(g, "hdg"), D(g, "length"), g.Elements().First())).ToList();
+            var elev = road.Element("elevationProfile")?.Elements("elevation").Select(e => new Poly(D(e, "s"), D(e, "a"), D(e, "b"), D(e, "c"), D(e, "d"))).ToList() ?? [];
+            var lanesEl = road.Element("lanes")!;
+            var offsets = lanesEl.Elements("laneOffset").Select(e => new Poly(D(e, "s"), D(e, "a"), D(e, "b"), D(e, "c"), D(e, "d"))).ToList();
+            var sections = lanesEl.Elements("laneSection").ToList();
+            // The road's kind from its driving lanes each way: a wide road's dashes are long, a narrow street's short
+            int perSide = sections.Count == 0 ? 0 : new[] { "left", "right" }.Max(side =>
+                sections[0].Element(side)?.Elements("lane").Count(l => (string)l.Attribute("type") == "driving") ?? 0);
+            var (dash, gap) = perSide >= 3 ? (6.0, 12.0) : perSide == 2 ? (3.0, 6.0) : (3.0, 4.5);
+            (double x, double y, double h, double z) At(double sPos)
+            {
+                var g = geoms.Last(q => q.S <= sPos + 1e-9);
+                var (x, y, h) = Eval(g, Math.Min(g.Length, sPos - g.S));
+                double t = offsets.Count > 0 ? Pick(offsets, sPos).At(sPos) : 0;
+                return (x - Math.Sin(h) * t, y + Math.Cos(h) * t, h, elev.Count > 0 ? Pick(elev, sPos).At(sPos) : 0);
+            }
+            // Driving lanes' extent across the road at s, on one side (sign +1 left, −1 right): from, to (t)
+            (double from, double to) Driving(double sPos, int sign)
+            {
+                var sec = sections.Last(q => D(q, "s") <= sPos + 1e-9);
+                var lanes = sec.Element(sign > 0 ? "left" : "right")?.Elements("lane").OrderBy(l => Math.Abs((int)l.Attribute("id")!)).ToList() ?? [];
+                double t = 0, a = double.NaN, b = double.NaN;
+                foreach (var lane in lanes)
+                {
+                    var ws = lane.Elements("width").Select(w => new Poly(D(w, "sOffset"), D(w, "a"), D(w, "b"), D(w, "c"), D(w, "d"))).ToList();
+                    double w = ws.Count > 0 ? Pick(ws, sPos - D(sec, "s")).At(sPos - D(sec, "s")) : 0;
+                    if ((string)lane.Attribute("type") == "driving") { if (double.IsNaN(a)) a = t; b = t + w; }
+                    t += w;
+                }
+                return (a, b);
+            }
+            (double x, double y, double z) Point((double x, double y, double h, double z) r, double t, double along)
+                => toGame((r.x - Math.Sin(r.h) * t + Math.Cos(r.h) * along, r.y + Math.Cos(r.h) * t + Math.Sin(r.h) * along, r.z));
+            // Stop bars at stop signs and traffic lights, give-way triangles at yield signs, across the lanes they govern
+            foreach (var sig in road.Element("signals")?.Elements("signal") ?? [])
+            {
+                var type = (string)sig.Attribute("type");
+                if (type is not ("206" or "1000001" or "205")) continue;
+                var o = (string)sig.Attribute("orientation");
+                if (o is not ("+" or "-")) continue;
+                double sp = Math.Clamp(D(sig, "s"), 0.2, length - 0.2);
+                int sign = o == "+" ? -1 : 1; // "+": for traffic along s, the right lanes
+                var (a, b) = Driving(sp, sign);
+                if (double.IsNaN(a) || b - a < 1) continue;
+                var r = At(sp);
+                if (type == "205")
+                {
+                    // Shark's teeth: triangles 0.6 wide, 0.6 deep, pointing at the oncoming traffic
+                    double dir = sign < 0 ? -1 : 1;
+                    for (double t = a + 0.2; t + 0.6 <= b; t += 0.9)
+                        patches.Add(new Patch(false, [Point(r, sign * t, 0), Point(r, sign * (t + 0.6), 0), Point(r, sign * (t + 0.3), dir * 0.6)]));
+                }
+                else
+                {
+                    double w = 0.4; // m deep
+                    patches.Add(new Patch(false, [Point(r, sign * a, -w / 2), Point(r, sign * b, -w / 2), Point(r, sign * b, w / 2), Point(r, sign * a, w / 2)]));
+                }
+            }
+            // Zebra crossings: stripes across the crosswalk outline, 0.5 m wide every metre
+            foreach (var obj in road.Element("objects")?.Elements("object") ?? [])
+            {
+                if ((string)obj.Attribute("type") != "crosswalk") continue;
+                double len = D(obj, "length"), wid = D(obj, "width");
+                if (len < 1 || wid < 0.5) continue;
+                var r = At(Math.Clamp(D(obj, "s"), 0, length));
+                double tc = D(obj, "t"), hdg = r.h + D(obj, "hdg");
+                (double x, double y, double z) Local(double u, double v)
+                {
+                    double x0 = r.x - Math.Sin(r.h) * tc, y0 = r.y + Math.Cos(r.h) * tc;
+                    return toGame((x0 + Math.Cos(hdg) * u - Math.Sin(hdg) * v, y0 + Math.Sin(hdg) * u + Math.Cos(hdg) * v, r.z));
+                }
+                for (double u = -len / 2 + 0.25; u + 0.5 <= len / 2; u += 1.0)
+                    patches.Add(new Patch(false, [Local(u, -wid / 2), Local(u + 0.5, -wid / 2), Local(u + 0.5, wid / 2), Local(u, wid / 2)]));
+            }
+            for (int k = 0; k < sections.Count; k++)
+            {
+                var sec = sections[k];
+                double s0 = D(sec, "s");
+                double s1 = k + 1 < sections.Count ? D(sections[k + 1], "s") : length;
+                if (s1 - s0 < 0.5) continue;
+                // Each side's lanes from the centre out, with their width polynomials (relative to the section)
+                var sides = new[] { ("left", 1), ("right", -1) }.Select(q => (
+                    sign: q.Item2,
+                    lanes: sec.Element(q.Item1)?.Elements("lane").OrderBy(l => Math.Abs((int)l.Attribute("id")!)).ToList() ?? []
+                )).ToList();
+                double WidthOf(XElement lane, double ds)
+                {
+                    var ws = lane.Elements("width").Select(w => new Poly(D(w, "sOffset"), D(w, "a"), D(w, "b"), D(w, "c"), D(w, "d"))).ToList();
+                    return ws.Count > 0 ? Pick(ws, ds).At(ds) : 0;
+                }
+                // Every edge with marks: the centre lane (the reference line), and each lane's outer edge
+                var edges = new List<(XElement lane, int sign, int depth, List<XElement> inner)>();
+                var centre = sec.Element("center")?.Element("lane");
+                if (centre != null) edges.Add((centre, 0, 0, []));
+                foreach (var (sign, lanes) in sides)
+                    for (int d = 0; d < lanes.Count; d++) edges.Add((lanes[d], sign, d, lanes.Take(d + 1).ToList()));
+                foreach (var (lane, sign, _, inner) in edges)
+                {
+                    var rms = lane.Elements("roadMark").OrderBy(m => D(m, "sOffset")).ToList();
+                    for (int r = 0; r < rms.Count; r++)
+                    {
+                        var rm = rms[r];
+                        var type = ((string)rm.Attribute("type") ?? "none").ToLowerInvariant();
+                        if (type is not ("solid" or "broken" or "solid solid" or "solid broken" or "broken solid" or "broken broken")) continue;
+                        double m0 = s0 + D(rm, "sOffset");
+                        double m1 = r + 1 < rms.Count ? s0 + D(rms[r + 1], "sOffset") : s1;
+                        if (m1 - m0 < 0.5) continue;
+                        var color = ((string)rm.Attribute("color") ?? "standard").ToLowerInvariant();
+                        double width = rm.Attribute("width") != null ? D(rm, "width") : 0.15;
+                        if (width <= 0.01) width = 0.15;
+                        var pts = new List<(double x, double y, double z)>();
+                        for (double sPos = m0; ; sPos = Math.Min(m1, sPos + Step))
+                        {
+                            var g = geoms.Last(q => q.S <= sPos + 1e-9);
+                            var (x, y, h) = Eval(g, Math.Min(g.Length, sPos - g.S));
+                            double t = offsets.Count > 0 ? Pick(offsets, sPos).At(sPos) : 0;
+                            foreach (var l in inner) t += sign * WidthOf(l, sPos - s0);
+                            x += -Math.Sin(h) * t;
+                            y += Math.Cos(h) * t;
+                            var z = elev.Count > 0 ? Pick(elev, sPos).At(sPos) : 0;
+                            pts.Add(toGame((x, y, z)));
+                            if (sPos >= m1) break;
+                        }
+                        var keep = Simplify(pts, 0.05);
+                        marks.Add(new Mark(color == "yellow", width, type, keep.Select(i => pts[i]).ToList(), dash, gap));
+                    }
+                }
+            }
+        }
+        return (marks, patches);
+    }
+
     /** Indices of the points to keep: Douglas–Peucker to Tolerance, no segment longer than MaxSegment. */
-    static List<int> Simplify(List<(double x, double y, double z)> p)
+    static List<int> Simplify(List<(double x, double y, double z)> p, double tolerance = Tolerance)
     {
         var keep = new SortedSet<int> { 0, p.Count - 1 };
         void Rec(int a, int b)
@@ -198,7 +351,7 @@ static class Xodr
                 double d = Math.Sqrt(ex * ex + ey * ey + ez * ez);
                 if (d > best) { best = d; at = i; }
             }
-            if (best > Tolerance || Math.Sqrt(len2) > MaxSegment)
+            if (best > tolerance || Math.Sqrt(len2) > MaxSegment)
             {
                 keep.Add(at);
                 Rec(a, at);

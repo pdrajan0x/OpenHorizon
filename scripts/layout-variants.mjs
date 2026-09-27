@@ -508,9 +508,27 @@ function run(key, v) {
     }
     const d = decks[links.indexOf(l)];
     const frames = d.frames;
+    // Buildings in its way over land: 4 m steps where something stands 3 m or more above the deck (the
+    // approach's corridor would cut its lower 9 m away, leaving the rest floating)
+    let cut = 0;
+    const cutBy = {};
+    for (const f of frames) {
+      const k = plannerLandAt(f.p.x, f.p.z);
+      if (k < 0) continue;
+      for (const side of [-1, 0, 1]) {
+        const x = f.p.x + f.r.x * side * (f.hw + 3);
+        const z = f.p.z + f.r.z * side * (f.hw + 3);
+        if ((plans[k].top?.(x, z) ?? -Infinity) > f.p.y + 3) {
+          cut += 4;
+          const n = cities[which[k]].name;
+          cutBy[n] = (cutBy[n] ?? 0) + 4;
+          break;
+        }
+      }
+    }
     return {
       a: l.a, b: l.b, p, q, length: frames[frames.length - 1].s, land,
-      curve: frames.map((f) => [f.p.x, f.p.z]), top: Math.max(...frames.map((f) => f.p.y)), bend: d.bend,
+      curve: frames.map((f) => [f.p.x, f.p.z]), top: Math.max(...frames.map((f) => f.p.y)), bend: d.bend, cut, cutBy,
     };
   });
   const degree = new Array(n).fill(0);
@@ -597,7 +615,7 @@ function run(key, v) {
     offsets: Object.fromEntries(which.map((k) => [cities[k].id, [offsets[k].x, offsets[k].z]])),
     bridges: bridges.map((b) => ({
       a: name(b.a), b: name(b.b), km: +(b.length / 1000).toFixed(2), landKm: +(b.land / 1000).toFixed(2),
-      bend: `${b.bend.shape} ${b.bend.amp.toFixed(0)} m`, topM: +b.top.toFixed(1),
+      bend: `${b.bend.shape} ${b.bend.amp.toFixed(0)} m`, topM: +b.top.toFixed(1), cutM: b.cut, cutBy: b.cutBy,
     })),
     bridgeKm: bridges.reduce((s, b) => s + b.length, 0) / 1000,
     longest: Math.max(...bridges.map((b) => b.length)) / 1000,
@@ -712,7 +730,7 @@ for (const [key, v] of Object.entries(VARIANTS)) {
   console.log(`${key}: ${s.bridges.length} bridges ${s.bridgeKm.toFixed(1)} km, longest ${s.longest.toFixed(1)}, cuts ${s.cuts.length}, `
     + `avg drive ${s.avgDriveKm.toFixed(1)} km ×${s.avgDetour.toFixed(2)}, single-bridge cities ${s.cities.filter((c) => c.bridges < 2).map((c) => c.name).join(', ') || 'none'}, `
     + `one-exit cities ${s.cities.filter((c) => c.exits < 2).map((c) => c.name).join(', ') || 'none'} (${s.planMs} ms)`);
-  for (const b of s.bridges) console.log(`   ${b.a} ↔ ${b.b}: ${b.km} km (${b.landKm} over land), ${b.bend}, top ${b.topM} m`);
+  for (const b of s.bridges) console.log(`   ${b.a} ↔ ${b.b}: ${b.km} km (${b.landKm} over land), ${b.bend}, top ${b.topM} m, through buildings ${b.cutM} m ${JSON.stringify(b.cutBy)}`);
 }
 fs.writeFileSync(`${OUT}/stats.json`, JSON.stringify(all, null, 1));
 if (!pick.length) {

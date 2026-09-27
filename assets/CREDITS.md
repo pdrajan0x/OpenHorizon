@@ -94,6 +94,7 @@ rights holders).
 - [Grass V](https://www.gta5-mods.com/misc/grass-v-improved-models-textures-density-beta-oiv-foxy_oxy) by Foxy_Oxy
 - [Real California Architecture](https://www.gta5-mods.com/misc/real-freeway-signs) by _Vlad_
 - [Lighting Freeway Crash Barriers](https://www.gta5-mods.com/misc/lighting-freeway-barriers) by Venkey
+- [Roads of Europe: Definitive Edition - Street Retexture](https://www.gta5-mods.com/maps/roads-of-europe) by Mouhzanfarydeh: the asphalt and footpath slabs on every city's roads
 - [Modular Map Builder pack](https://www.gta5-mods.com/misc/simple-road-pack-v-0-1-alpha) by EncryptedReality
 - [Custom Props Add-On](https://www.gta5-mods.com/maps/custom-prop) by Shaezbreizh
 

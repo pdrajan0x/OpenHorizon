@@ -17,7 +17,8 @@ import * as THREE from 'three';
 import { BridgeNetwork, LANES, planLinks, type IslandPlan } from './bridges';
 import { Coast, area } from './coast';
 import { Corridors } from './corridors';
-import { GameMap, RoadGraph, type Manifest, type RoadData } from './map';
+import { GameMap, RoadGraph, litMaterial, type Manifest, type RoadData } from './map';
+import { Markings } from './markings';
 import { worldLayout } from './layout';
 import { cleanMask, traceLoops, verticalOffset, type CoastLoop } from './outline';
 
@@ -343,7 +344,21 @@ export class Islands {
     }
     const placed = shaped.map((s, k): [number, number, number, number] =>
       [s.rect[0] + offsets[k].x, s.rect[1] + offsets[k].z, s.rect[2] + offsets[k].x, s.rect[3] + offsets[k].z]);
+    // A map's stray pieces far outside its own land (Chicago has a few, kilometres out) would stand inside
+    // whichever city now sits there: cells centred on another island's land are left out
+    shaped.forEach((sh, k) => {
+      const half = sh.data.manifest.cellSize / 2;
+      for (const c of sh.data.manifest.cells) {
+        const owner = occ.at(c.x + half + offsets[k].x, c.z + half + offsets[k].z);
+        if (owner >= 0 && owner !== k) { c.render = false; c.collision = false; }
+      }
+    });
     const maps = shaped.map((s, k) => GameMap.from(s.info.id, s.data, world, offsets[k]));
+    // Painted lines where a map has none of its own (CARLA's towns, from their road networks)
+    await Promise.all(maps.map(async (m) => {
+      m.markings = await Markings.load(`/mods/maps/${m.id}`, litMaterial);
+      if (m.markings) m.root.add(m.markings.root);
+    }));
     console.log('islands:', shaped.map((s, k) => `${s.info.id} @ ${offsets[k].toArray().map((v) => v.toFixed(0)).join(',')}`).join('; '));
 
     // One road graph: every island's, then the bridge decks
@@ -431,6 +446,7 @@ export class Islands {
       const near = m.distanceTo(camera) < STREAM_MARGIN || solid.some((p) => m.distanceTo(p) < STREAM_MARGIN);
       if (near || m.active) m.update(camera, solid);
     }
+    for (const m of this.maps) m.markings?.update(camera, m.offset);
     this.coast?.update(camera);
     this.bridges?.update(camera);
   }

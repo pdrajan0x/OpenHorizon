@@ -123,6 +123,11 @@ if has carla; then
   # id, level, road file
   while read -r id level xodr; do
     [[ -n ${MAPS:-} && " $MAPS " != *" $id "* ]] && continue
+    # Road markings from the road network (CARLA's own are decals, which don't convert), less any the map has painted
+    if [[ -d public/mods/maps/$id && ! -f public/mods/maps/$id/markings.json ]]; then
+      dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll markings "$d/x/$maps/$xodr" "public/mods/maps/$id/markings.json" | tail -1
+      node scripts/existing-paint.mjs "$id" --apply
+    fi
     [[ -f public/mods/maps/$id/manifest.json && -z ${FORCE:-} ]] && { echo "= $id"; continue; }
     echo "> $id"
     tmp="public/mods/maps/.$id.tmp"
@@ -130,6 +135,8 @@ if has carla; then
     DOTNET_GCConserveMemory=7 dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll map "$d/x" "$maps/$level" "$tmp" --xodr "$d/x/$maps/$xodr" | tail -1
     rm -rf "public/mods/maps/$id" && mv "$tmp" "public/mods/maps/$id"
     node scripts/island-stats.mjs "$id" | tail -1
+    dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll markings "$d/x/$maps/$xodr" "public/mods/maps/$id/markings.json" | tail -1
+    node scripts/existing-paint.mjs "$id" --apply
   done <<'EOF_TOWNS'
 carla-town12 Town12/Town12 Town12/OpenDrive/Town12.xodr
 carla-town10 Town10HD OpenDrive/Town10HD.xodr

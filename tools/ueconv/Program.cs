@@ -198,6 +198,33 @@ static class Program
             }
             return 0;
         }
+        if (args.Length >= 3 && args[0] == "markings")
+        {
+            // An OpenDRIVE network's road markings → markings.json: lines [yellow 0/1, width, type, [x, y, z, …], dash, gap]
+            // and patches (stop bars, give-way triangles, zebra stripes) [yellow 0/1, [x, y, z, …]]
+            // In the converted map's frame: less the origin it was centred on (its manifest, beside the output)
+            double ox = 0, oz = 0;
+            var manifest = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[2]))!, "manifest.json");
+            if (File.Exists(manifest))
+            {
+                var origin = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifest))?["origin"]?.AsArray();
+                if (origin != null) { ox = (double)origin[0]!; oz = (double)origin[2]!; }
+            }
+            var (marks, patches) = Xodr.Markings(args[1], v => (v.x - ox, v.z, -v.y - oz));
+            System.Text.Json.Nodes.JsonArray Flat(IEnumerable<(double x, double y, double z)> pts)
+            {
+                var a = new System.Text.Json.Nodes.JsonArray();
+                foreach (var (x, y, z) in pts) { a.Add(Math.Round(x, 2)); a.Add(Math.Round(y, 2)); a.Add(Math.Round(z, 2)); }
+                return a;
+            }
+            var lines = new System.Text.Json.Nodes.JsonArray();
+            foreach (var m in marks) lines.Add(new System.Text.Json.Nodes.JsonArray(m.Yellow ? 1 : 0, Math.Round(m.Width, 3), m.Type, Flat(m.Pts), m.Dash, m.Gap));
+            var patchArr = new System.Text.Json.Nodes.JsonArray();
+            foreach (var p in patches) patchArr.Add(new System.Text.Json.Nodes.JsonArray(p.Yellow ? 1 : 0, Flat(p.Corners)));
+            File.WriteAllText(args[2], new System.Text.Json.Nodes.JsonObject { ["lines"] = lines, ["patches"] = patchArr }.ToJsonString());
+            Console.WriteLine($"{args[2]}: {marks.Count} marked lines, {patches.Count} patches");
+            return 0;
+        }
         if (args.Length >= 4 && args[0] == "map")
         {
             var i = Array.IndexOf(args, "--xodr");
@@ -205,7 +232,7 @@ static class Program
             UeMap.Write(Open(args[1]), args[2], i > 0 ? args[i + 1] : null, args[3], t > 0 ? args[t + 1] : null);
             return 0;
         }
-        Console.Error.WriteLine("usage: ueconv ls <paks> [filter] | level <paks> <level>");
+        Console.Error.WriteLine("usage: ueconv ls <paks> [filter] | level <paks> <level> | markings <file.xodr> <out.json>");
         return 1;
     }
 }
