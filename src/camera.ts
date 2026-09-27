@@ -39,6 +39,8 @@ export class ChaseCamera {
   private lookYaw = 0;
   private lookPitch = 0;
   private lookIdle = 0; // s since the look input was let go
+  /** Test scripts (?debug): a fixed viewpoint instead of following the car, e.g. a bridge seen from the sea. */
+  view: { from: THREE.Vector3Like; to: THREE.Vector3Like; fov?: number } | null = null;
 
   toggle(): CameraMode {
     const nextIdx = (MODES.indexOf(this.mode) + 1) % MODES.length;
@@ -92,6 +94,13 @@ export class ChaseCamera {
   }
 
   update(dt: number, car: Car, clearance: Clearance): void {
+    if (this.view) {
+      this.camera.position.copy(this.view.from);
+      this.camera.lookAt(this.view.to.x, this.view.to.y, this.view.to.z);
+      this.camera.fov = this.view.fov ?? BASE_FOV;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
     this.time += dt;
     const speedT = Math.min(1, car.speed / SPEED_FOR_MAX_FOV);
     const boost = car.drift.boosting ? 1 : 0;

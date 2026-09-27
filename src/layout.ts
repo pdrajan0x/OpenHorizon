@@ -1,21 +1,20 @@
-// The world's design: three regions side by side, each a handful of the best-looking cities, packed so
-// that every city's neighbours are about CHANNEL m of sea away and no drive from one city to the next is
-// a long empty crossing:
+// The world's design: a hub. CARLA's Town 12, the biggest city, is in the middle and every other city is
+// round it, a short bridge away, so no city is at the end of a long chain:
 //
-//   the Americas (west)   the two big towns of the plains (CARLA's Town 12) and the Great Lakes (Chicago),
-//                         with CARLA's Town 10 downtown as an island between them
-//   Europe (middle)       the Mediterranean coast (the Riviera)
-//   Asia (east)           China (LordCity) and Japan: the coast town of Ugase, the mountain passes (Akina,
-//                         Tsukuba) and Tokyo (Shibuya)
+//   north   LordCity and Chicago, side by side, each bridged to Town 12's north shore and to each other
+//   east    Mt. Tsukuba off Town 12's east side, Mt. Akina between it and Chicago
+//   south   Shibuya and the French Riviera off Town 12's south shore, bridged to each other
+//   west    Ugase off Town 12's south-west, Town 10 an island between Ugase and the Riviera
 //
-// Links follow the real world: Chicago over the Atlantic to the Riviera and on across the Pacific to
-// LordCity, the Riviera round to Japan's coast, and within each region a loop, so there are circuits
-// rather than one long chain.
+// Town 12 has six bridges, on all four sides; every other city has two or three, from different parts of
+// its shore; losing any one bridge leaves every city reachable.
 //
-// DESIGN gives each city's rough place (km) and the links; a small relaxation then settles the real
-// positions from the cities' sizes: linked cities pull to CHANNEL m apart, every pair pushes apart below
-// MIN_GAP, and a weak pull back to the designed place keeps the arrangement. Cities that end up close
-// without a designed link get one too. Pure (no three.js), so scripts/layout-preview.mjs can draw it.
+// WORLD gives each city's rough place (km) and the links. `fixed` pins a city's frame exactly: the places
+// scripts/layout-variants.mjs settled on, moving the cities until each link is a short bridge between
+// roads that reach the shore (a city's streets often stop well inland of its coast). A city not pinned
+// (one added later) is placed by a small relaxation from the rough place and its size: linked cities pull
+// to CHANNEL m apart, every pair pushes apart below MIN_GAP, a weak pull keeps the arrangement. Pure (no
+// three.js), so the preview scripts can use it.
 
 /** A city's land rectangle in its own frame: [minX, minZ, maxX, maxZ], x north, z east. */
 export type Rect = [number, number, number, number];
@@ -33,29 +32,39 @@ export interface LayoutLink {
 export interface Design {
   at: Record<string, [number, number]>;
   links: [string, string, number][];
+  /** Exact frame offsets (m, x and z) for cities placed ahead of time; these don't move. */
+  fixed?: Record<string, [number, number]>;
+  /** Link cities that end up within NEAR_LINK m without a designed link (default: yes). */
+  nearLinks?: boolean;
 }
 
-/** Rough centres in km, x north and z east. */
-const DESIGN: Record<string, [number, number]> = {
-  'carla-town12': [0, -20],
-  'carla-town10': [-2, -13.6],
-  chicago: [0, -6],
-  'french-riviera': [-4.5, 4],
-  lordcity: [3.2, 3.3],
-  'ugase-city': [-4.5, 10.6],
-  akina: [3.5, 7.3],
-  tsukuba: [3.2, 11.3],
-  shibuya: [-1.2, 11],
-};
-/** [a, b, rank]: 0 within a region, 1 between regions */
-const LINKS: [string, string, number][] = [
-  ['carla-town12', 'chicago', 0], ['carla-town12', 'carla-town10', 0], ['carla-town10', 'chicago', 0],
-  ['chicago', 'french-riviera', 1], ['chicago', 'lordcity', 1], ['french-riviera', 'lordcity', 1], ['french-riviera', 'ugase-city', 1],
-  ['lordcity', 'akina', 0], ['lordcity', 'ugase-city', 0], ['ugase-city', 'shibuya', 0], ['akina', 'tsukuba', 0], ['tsukuba', 'shibuya', 0],
-];
+const T12 = 'carla-town12';
+const T10 = 'carla-town10';
+const CHI = 'chicago';
+const LC = 'lordcity';
+const UG = 'ugase-city';
+const RIV = 'french-riviera';
+const TSU = 'tsukuba';
+const AK = 'akina';
+const SHI = 'shibuya';
 
-/** The world the game builds. scripts/layout-variants.mjs tries others. */
-export const WORLD: Design = { at: DESIGN, links: LINKS };
+/** The world the game builds (scripts/layout-variants.mjs tries others). */
+export const WORLD: Design = {
+  at: {
+    [T12]: [0, 0], [LC]: [8.1, -4.5], [CHI]: [9.5, 2.0], [UG]: [-4.0, -8.9], [RIV]: [-7.7, -1.0], [SHI]: [-6.7, 3.6],
+    [TSU]: [1.2, 8.2], [AK]: [5.0, 7.5], [T10]: [-8.5, -8.0],
+  },
+  // rank: 0 the spokes to Town 12, 1 round the rim (a lower rank is built first where two would cross)
+  links: [
+    [T12, LC, 0], [T12, CHI, 0], [T12, UG, 0], [T12, RIV, 0], [T12, SHI, 0], [T12, TSU, 0],
+    [LC, CHI, 1], [CHI, AK, 1], [AK, TSU, 1], [SHI, RIV, 1], [RIV, T10, 1], [T10, UG, 1],
+  ],
+  fixed: {
+    [T12]: [-600, 500], [LC]: [41200, -3000], [CHI]: [6300, 1100], [UG]: [-5800, -5700], [RIV]: [-7600, 1000],
+    [SHI]: [-5700, 1800], [TSU]: [1300, 8500], [AK]: [7000, 6800], [T10]: [-8200, -4900],
+  },
+  nearLinks: false,
+};
 
 const CHANNEL = 550; // m of sea between linked cities' land
 const MIN_GAP = 500; // m of sea at least between any two cities
@@ -70,6 +79,7 @@ interface Body {
   hz: number;
   hx0: number; // designed centre
   hz0: number;
+  pinned: boolean; // placed ahead of time (Design.fixed): doesn't move
 }
 
 /** Sea between two rectangles, edge to edge (negative when they overlap). */
@@ -108,7 +118,11 @@ export function worldLayout(list: { id: string; rect: Rect }[], design: Design =
   list.forEach((l, k) => {
     const at = design.at[l.id];
     if (!at) return;
-    const b = { k, x: at[0] * 1000, z: at[1] * 1000, hx: (l.rect[2] - l.rect[0]) / 2, hz: (l.rect[3] - l.rect[1]) / 2, hx0: at[0] * 1000, hz0: at[1] * 1000 };
+    const pin = design.fixed?.[l.id];
+    // A pinned city's centre: its frame offset plus its rectangle's middle
+    const x = pin ? pin[0] + (l.rect[0] + l.rect[2]) / 2 : at[0] * 1000;
+    const z = pin ? pin[1] + (l.rect[1] + l.rect[3]) / 2 : at[1] * 1000;
+    const b = { k, x, z, hx: (l.rect[2] - l.rect[0]) / 2, hz: (l.rect[3] - l.rect[1]) / 2, hx0: x, hz0: z, pinned: !!pin };
     bodies.push(b);
     byId.set(l.id, b);
   });
@@ -119,7 +133,8 @@ export function worldLayout(list: { id: string; rect: Rect }[], design: Design =
   const linked = new Set(designed.map(([a, b]) => `${Math.min(a.k, b.k)},${Math.max(a.k, b.k)}`));
   const isLinked = (a: Body, b: Body) => linked.has(`${Math.min(a.k, b.k)},${Math.max(a.k, b.k)}`);
 
-  for (let it = 0; it < ITERATIONS; it++) {
+  const settled = bodies.every((b) => b.pinned);
+  for (let it = 0; it < (settled ? 0 : ITERATIONS); it++) {
     const pull = 0.25 * (1 - it / ITERATIONS) + 0.02;
     for (const [a, b] of designed) {
       const g = gap(a, b);
@@ -141,6 +156,7 @@ export function worldLayout(list: { id: string; rect: Rect }[], design: Design =
         separate(bodies[i], bodies[j], isLinked(bodies[i], bodies[j]) ? CHANNEL * 0.9 : MIN_GAP);
       }
     }
+    for (const b of bodies) if (b.pinned) { b.x = b.hx0; b.z = b.hz0; }
   }
 
   for (const b of bodies) {
@@ -154,7 +170,7 @@ export function worldLayout(list: { id: string; rect: Rect }[], design: Design =
     return gx > gz ? 'x' : 'z';
   };
   for (const [a, b, rank] of designed) links.push({ a: a.k, b: b.k, axis: axis(a, b), rank });
-  for (let i = 0; i < bodies.length; i++) {
+  for (let i = 0; i < (design.nearLinks === false ? 0 : bodies.length); i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const [a, b] = [bodies[i], bodies[j]];
       if (isLinked(a, b) || gap(a, b) > NEAR_LINK) continue;

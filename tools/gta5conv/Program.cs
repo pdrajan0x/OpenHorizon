@@ -24,11 +24,13 @@ static class Program
         ShaderNames.Load();
         if (args.Length >= 2 && args[0] == "dump") { Dump.Run(args[1]); return 0; }
         if (args.Length >= 3 && args[0] == "car") { CarExport.Run(args[1..]); return 0; }
+        if (args.Length >= 3 && args[0] == "model") { ModelExport.Run(args[1..]); return 0; }
         if (args.Length >= 3 && args[0] == "rpf") { RpfExport.Run(args[1..]); return 0; }
         if (args.Length >= 2 && args[0] == "map") { MapExport.Run(args[1..]); return 0; }
         if (args.Length >= 2 && args[0] == "audio") { AudioExport.Run(args[1..]); return 0; }
         if (args.Length >= 2 && args[0] == "tex") { TexExport.Run(args[1..]); return 0; }
-        Console.Error.WriteLine("usage: gta5conv dump <file.yft> | car <out.glb> <model.yft> [textures.ytd ...] [--max-tex N]");
+        Console.Error.WriteLine("usage: gta5conv dump <file.yft> | car <out.glb> <model.yft> [textures.ytd ...] [--max-tex N]"
+            + " | model <out.glb> <model.ydr> [textures.ytd ...] [--max-tex N]");
         return 1;
     }
 }
@@ -220,6 +222,56 @@ static class CarExport
             result[i] = b.ParentIndex >= 0 && b.ParentIndex < i ? local * result[b.ParentIndex] : local;
         }
         return result;
+    }
+}
+
+/// <summary>
+/// One drawable (a prop: a bridge piece, a pier) as a glTF, its most detailed level, in the game frame
+/// (x forward, y up), with its textures: for kit pieces the game repeats along its own geometry.
+/// </summary>
+static class ModelExport
+{
+    public static void Run(string[] args)
+    {
+        var outPath = args[0];
+        var ydrPath = args[1];
+        int maxTex = 2048;
+        var ytds = new List<string>();
+        for (int i = 2; i < args.Length; i++)
+        {
+            if (args[i] == "--max-tex") maxTex = int.Parse(args[++i]);
+            else ytds.Add(args[i]);
+        }
+
+        var ydr = new YdrFile();
+        ydr.Load(File.ReadAllBytes(ydrPath));
+        var drawable = ydr.Drawable;
+        var textures = new Dictionary<string, Texture>(StringComparer.OrdinalIgnoreCase);
+        void addDict(TextureDictionary td)
+        {
+            foreach (var t in td?.Textures?.data_items ?? []) if (t?.Name != null) textures.TryAdd(t.Name, t);
+        }
+        foreach (var path in ytds)
+        {
+            var ytd = new YtdFile();
+            ytd.Load(File.ReadAllBytes(path));
+            addDict(ytd.TextureDict);
+        }
+        addDict(drawable.ShaderGroup?.TextureDictionary);
+
+        var tris = new List<(ShaderFX, Tri)>();
+        foreach (var model in drawable.DrawableModels?.High ?? [])
+            foreach (var g in model.Geometries ?? [])
+                foreach (var tri in Tri.Read(g, Matrix.Identity, false)) tris.Add((g.Shader, tri));
+        var name = Path.GetFileNameWithoutExtension(ydrPath);
+        var gltf = new Gltf(textures, maxTex);
+        gltf.AddNode(name, gltf.AddMesh(name, tris));
+        gltf.Save(outPath);
+        var all = tris.SelectMany(t => new[] { t.Item2.A.P, t.Item2.B.P, t.Item2.C.P }).ToList();
+        var size = all.Count > 0
+            ? $"{all.Max(p => p.X) - all.Min(p => p.X):0.0} x {all.Max(p => p.Y) - all.Min(p => p.Y):0.0} x {all.Max(p => p.Z) - all.Min(p => p.Z):0.0} m"
+            : "empty";
+        Console.WriteLine($"{outPath}: {tris.Count} triangles, {size}, {gltf.Stats} missing textures: {string.Join(", ", gltf.MissingTextures.Order())}");
     }
 }
 
