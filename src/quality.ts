@@ -11,4 +11,5 @@ export const EFFECTS = {
   shade: !off.has('shade'),
   far: QUALITY === 'high' && !off.has('far'),
   detail: !off.has('detail'),
+  reflections: QUALITY === 'high' && !off.has('reflections'), // live city reflections on the player's car
 };

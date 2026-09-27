@@ -75,6 +75,7 @@ rights holders).
 ## Sounds
 
 - [Real Sounds Mod (ALL IN ONE)](https://www.gta5-mods.com/vehicles/real-sounds-mod-by-peaceone-all-in-one) by PeaceONE
+- [Bugatti Chiron Pur Sport W16 Sound Mod](https://www.gta5-mods.com/vehicles/bugatti-chiron-pursport-w16-sound-mod-sp-add-on-fivem-legacy_dmc) by Legacy_DMC
 - [Realistic Tire Skid Sound Mod](https://www.gta5-mods.com/misc/realistic-tire-skid-sound-mod) by StraightGlitcheZ
 - [Better Crash Sounds (BeamNG.drive)](https://www.beamng.com/resources/better-crash-sounds-completed.2554/) by Sugarking22795
 - [Alpha - Crash Sound Mod (BeamNG.drive)](https://www.beamng.com/resources/crash-sound-mod.2984/) by DriftTuner

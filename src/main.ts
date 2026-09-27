@@ -12,6 +12,8 @@ import { Hud } from './hud';
 import { Input, type Controls } from './input';
 import { Minimap } from './minimap';
 import { PostFX } from './postfx';
+import { EFFECTS } from './quality';
+import { CarReflections, contactShadow } from './reflections';
 import { RivalPack, type Rival } from './rivals';
 import { Islands } from './islands';
 import { RaceField } from './map';
@@ -21,6 +23,7 @@ import { Stunts } from './stunts';
 import { Traffic } from './traffic';
 import { WreckSmoke } from './damage';
 import { ensureHero, loadGarage, loadTrafficModels } from './garage';
+import { PauseMenu } from './menu';
 import { GARAGE } from './tuning';
 
 const FIXED_DT = 1 / 60;
@@ -87,6 +90,27 @@ async function main(): Promise<void> {
   await map.prime(spawn.position);
   let carIndex = 0;
   let player = new Car(world, scene, GARAGE[carIndex], spawn.position, spawn.yaw, true);
+  // The player's car in full detail: live reflections of the city in its paint and glass, sharp textures
+  // at grazing angles, and a soft shadow under it
+  const reflections = EFFECTS.reflections ? new CarReflections() : null;
+  const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  let playerShade: THREE.Mesh | null = null;
+  const dressPlayer = (car: Car) => {
+    reflections?.apply(car.mesh);
+    car.mesh.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        for (const t of Object.values(m) as unknown[]) if (t instanceof THREE.Texture) t.anisotropy = maxAnisotropy;
+      }
+    });
+    const h = car.visual.chassisHalf;
+    const shade = contactShadow(h.x * 2, h.z * 2);
+    shade.position.set(car.visual.chassisCenter.x, 0.03, car.visual.chassisCenter.z);
+    car.mesh.add(shade);
+    playerShade = shade;
+  };
+  dressPlayer(player);
   const trafficCount = params.get('traffic') === '0' ? 0 : TRAFFIC_CARS;
   const traffic = new Traffic(world, scene, map.roads, trafficCount ? await loadTrafficModels() : [], trafficCount);
   const cam = new ChaseCamera();
@@ -101,7 +125,7 @@ async function main(): Promise<void> {
   const sparks = new Sparks(scene);
   const stunts = new Stunts((x, z, fx, fz) => map.roads.laneOffset(x, z, fx, fz));
   const rivals = new RivalPack(world, scene, map.roads);
-  const input = new Input();
+  const input = new Input(canvas, (message) => hud.note(message, 'info'));
   const hud = new Hud();
   const minimap = new Minimap(document.getElementById('minimap') as HTMLCanvasElement, map.roads);
   const audio = new CarAudio();
@@ -137,6 +161,20 @@ async function main(): Promise<void> {
   });
   audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   hud.showCar(player);
+  // Esc / Menu: the pause menu (the world stops while it's open)
+  let leaveEvent = false;
+  const menu = new PauseMenu({
+    cars: () => GARAGE.map((t) => ({ name: t.name, make: t.className })),
+    currentCar: () => carIndex,
+    switchCar: (i) => {
+      if (i === carIndex) return;
+      if (events.running || crash || wreck) hud.note(events.running ? 'LEAVE THE EVENT TO SWITCH CAR' : 'WAIT FOR THE CRASH TO END', 'info');
+      else void switchCar(i);
+    },
+    inEvent: () => events.running !== null,
+    leaveEvent: () => { leaveEvent = true; },
+    controllerInfo: () => input.padInfo(),
+  });
 
   if (params.has('debug')) {
     window.__debug = {
@@ -229,6 +267,7 @@ async function main(): Promise<void> {
     const v = player.body.linvel();
     const old = player;
     player = new Car(world, scene, GARAGE[index], new THREE.Vector3(p.x, p.y + 0.1, p.z), -old.heading, true);
+    dressPlayer(player);
     player.body.setLinvel(v, true);
     old.dispose(world, scene);
     carIndex = index;
@@ -254,6 +293,7 @@ async function main(): Promise<void> {
     const p = player.body.translation();
     sparks.burst(new THREE.Vector3(p.x, p.y + 0.6, p.z).addScaledVector(player.forward, 2), player.forward.clone().negate(), 90, 10);
     audio.crash(Math.min(1, speed / 40));
+    input.rumble(1, 0.8, 450);
     if (player.wear(CRASH_WEAR + CRASH_WEAR_PER_MS * speed)) {
       startWreck();
       return;
@@ -308,12 +348,24 @@ async function main(): Promise<void> {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (worldMap.open) {
-      audio.update(0, 0, 0, false);
+      // The controller's View (or Menu) button closes the map again
+      const { actions: a } = input.update(dt);
+      if (a.map || a.menu) worldMap.toggle();
+      if (menu.open) menu.toggle();
+      audio.pause();
       requestAnimationFrame(frame);
       return;
     }
 
     const { controls, actions } = input.update(dt);
+    if (actions.menu) menu.escape();
+    if (menu.open) {
+      menu.update(input.nav);
+      audio.pause();
+      requestAnimationFrame(frame);
+      return;
+    }
+    if (actions.map) worldMap.toggle();
     if (actions.car !== null && actions.car !== carIndex && !events.running && !crash && !wreck) void switchCar(actions.car);
     if (actions.reset && !crash) {
       if (wreck) {
@@ -340,7 +392,8 @@ async function main(): Promise<void> {
       wreck = null;
       place(position, yaw);
     };
-    const frozen = events.update(dt, { player, controls, quit: actions.quit, stunts, rivals, traffic, place: eventPlace });
+    const frozen = events.update(dt, { player, controls, quit: actions.quit || leaveEvent, stunts, rivals, traffic, place: eventPlace });
+    leaveEvent = false;
     const drive = crash || wreck ? LIMP : frozen ? HELD : controls;
     const timeScale = crash && crash.t < CRASH_SLOW_SECONDS ? CRASH_TIME_SCALE : takedownSlow > 0 ? TAKEDOWN_TIME_SCALE : 1;
     takedownSlow -= dt;
@@ -367,6 +420,7 @@ async function main(): Promise<void> {
       if (hit > DENT_DV) {
         player.applyDamage(world, hit);
         audio.bump(Math.min(1, (hit - DENT_DV) / 8));
+        input.rumble(Math.min(1, (hit - DENT_DV) / 10), 0.4, 160);
         if (!wreck && player.wear(DENT_WEAR_PER_MS * (hit - DENT_DV))) startWreck();
       }
       if (!crash && !wreck && !frozen) {
@@ -427,6 +481,7 @@ async function main(): Promise<void> {
       crash.t += dt;
       if (crash.t > CRASH_SECONDS) endCrash();
     } else {
+      cam.look(dt, input.look);
       cam.update(dt, player, clearance);
     }
     atmosphere.update(simTime, cam.camera.position);
@@ -454,12 +509,29 @@ async function main(): Promise<void> {
       minimap.draw(p.x, p.z, player.heading, traffic.positions(), extras);
       worldMap.setState(p.x, p.z, player.heading, extras);
     }
-    audio.update(player.speed, controls.throttle, player.skidAmount, player.drift.boosting);
+    audio.update(dt, {
+      speed: player.speed, forwardSpeed: player.forwardSpeed, topSpeed: player.tuning.topSpeed,
+      throttle: crash || wreck ? 0 : controls.throttle, brake: controls.brake, handbrake: controls.handbrake,
+      skid: player.skidAmount, slip: player.slip, drifting: player.drift.drifting, boosting: player.drift.boosting,
+      grounded: player.wheelsInContact >= 2, dead: player.destroyed,
+    });
+    // The controller hums with the tyres sliding and the boost
+    if (frameCount % 6 === 0 && (player.skidAmount > 0.25 || player.drift.boosting)) {
+      input.rumble(player.drift.boosting ? 0.25 : 0, 0.15 + 0.35 * player.skidAmount, 120);
+    }
+    // The shadow under the car fades as it leaves the ground
+    if (playerShade) (playerShade.material as THREE.MeshBasicMaterial).opacity = 0.85 * (player.wheelsInContact / 4);
+    if (reflections) {
+      const roof = playerPos.clone().addScaledVector(player.up, 1.4);
+      reflections.update(renderer, scene, roof, player.mesh);
+    }
     fx.render();
 
     const t = traffic.stats();
     window.__game = {
       simTime,
+      gear: audio.gearbox.gear,
+      revs: audio.gearbox.revs,
       x: p.x,
       y: p.y,
       z: p.z,

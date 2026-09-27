@@ -12,8 +12,13 @@ type Layer = (typeof LAYERS)[number];
 interface StreamInfo {
   id: string;
   file: string;
+  role?: string;
   grains?: { start: number[]; hz: number[]; end: number };
 }
+
+/** One-shot recordings some engine banks carry alongside the loops. */
+export type Extra = 'exhaustPop' | 'limiterPop' | 'dumpValve' | 'startUp';
+const EXTRAS: Extra[] = ['exhaustPop', 'limiterPop', 'dumpValve', 'startUp'];
 interface EngineInfo {
   player: boolean;
   layers: Partial<Record<Layer, string>>;
@@ -42,6 +47,8 @@ const db = (d: number) => 10 ** (d / 20);
 
 export class GranularEngine {
   private readonly layers = new Map<Layer, LoadedLayer>();
+  /** The bank's one-shots by kind (empty where it has none). */
+  readonly extras = new Map<Extra, AudioBuffer[]>();
   private revs = 0;
   private throttle = 0;
 
@@ -70,7 +77,23 @@ export class GranularEngine {
       });
       g.levels.set(layer, db((engine.layerDb?.[layer] ?? 0) + group - 12));
     }));
+    await Promise.all(manifest.streams.filter((s) => EXTRAS.includes(s.role as Extra)).map(async (s) => {
+      const buffer = await fetch(`${base}/${s.file}`).then((r) => r.arrayBuffer()).then((d) => ctx.decodeAudioData(d)).catch(() => null);
+      if (!buffer) return;
+      const list = g.extras.get(s.role as Extra) ?? [];
+      list.push(buffer);
+      g.extras.set(s.role as Extra, list);
+    }));
     return g;
+  }
+
+  /** Fade every layer out and stop scheduling grains (paused); update() brings it back. */
+  silence(): void {
+    const now = this.ctx.currentTime;
+    for (const l of this.layers.values()) {
+      l.gain.gain.setTargetAtTime(0, now, 0.05);
+      l.next = 0;
+    }
   }
 
   private readonly levels = new Map<Layer, number>();

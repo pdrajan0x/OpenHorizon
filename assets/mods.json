@@ -28,6 +28,18 @@
     "downloaded": true
   },
   {
+    "id": "audio-bugatti-w16",
+    "category": "audio",
+    "title": "Bugatti Chiron Pur Sport W16 Sound Mod [SP Add-on | FiveM]",
+    "author": "Legacy_DMC",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/bugatti-chiron-pursport-w16-sound-mod-sp-add-on-fivem-legacy_dmc",
+    "fileUrl": "https://files.gta5-mods.com/uploads/bugatti-chiron-pursport-w16-sound-mod-sp-add-on-fivem-legacy_dmc/0a5aca-Bugatti_Chiron_Pur_Sport_W16_Sound_Legacy_DMC_January_1.rar",
+    "format": "mixed",
+    "files": [],
+    "hasLoose": false,
+    "notes": "58k downloads, 5/5. A recreated W16 quad-turbo engine (accel, decel, idle, turbos, pops) for the Bugatti Chiron, Divo and Bolide."
+  },
+  {
     "id": "audio-real-sounds",
     "category": "audio",
     "title": "Real Sounds Mod (ALL IN ONE)",

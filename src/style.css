@@ -151,3 +151,45 @@ html, body {
 }
 #worldmap.hidden { display: none; }
 #hud.hidden { display: none; }
+
+/* Pause menu (menu.ts) */
+#menu {
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; place-items: center;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 20, 0.55), rgba(8, 6, 20, 0.85));
+  backdrop-filter: blur(6px);
+}
+#menu.hidden { display: none; }
+.menu-panel {
+  min-width: 380px; max-width: min(640px, 92vw); max-height: 86vh;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 26px 30px 20px;
+  background: rgba(14, 10, 30, 0.82);
+  border: 1px solid rgba(0, 229, 255, 0.25); border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 30px rgba(255, 43, 214, 0.12);
+}
+.menu-title {
+  font-size: 30px; font-weight: 800; font-style: italic; letter-spacing: 0.12em;
+  color: #fff; text-shadow: 0 0 18px rgba(255, 43, 214, 0.6);
+}
+.menu-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.menu-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 18px;
+  padding: 11px 16px; border-radius: 8px; cursor: pointer;
+  font-size: 19px; font-weight: 600; color: rgba(255, 255, 255, 0.78);
+  border: 1px solid transparent; transition: background 0.12s, color 0.12s;
+}
+.menu-item small { font-size: 13px; font-weight: 500; opacity: 0.65; letter-spacing: 0.04em; }
+.menu-item.selected {
+  color: #fff; background: linear-gradient(90deg, rgba(255, 43, 214, 0.35), rgba(0, 229, 255, 0.18));
+  border-color: rgba(0, 229, 255, 0.45);
+}
+.menu-item.current span::after { content: '  ●'; color: #7dff9a; font-size: 12px; vertical-align: middle; }
+.menu-hint { font-size: 12px; opacity: 0.55; letter-spacing: 0.05em; }
+.menu-controls { border-collapse: collapse; font-size: 14px; }
+.menu-controls th { text-align: left; font-size: 12px; opacity: 0.6; font-weight: 600; padding: 0 14px 6px 0; }
+.menu-controls td { padding: 5px 14px 5px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.menu-pad {
+  white-space: pre-line; font: 12px/1.5 ui-monospace, monospace; color: #9fe8ff;
+  padding: 8px 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;
+}

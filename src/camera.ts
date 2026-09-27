@@ -1,12 +1,24 @@
 import * as THREE from 'three';
 import type { Car } from './car';
 
-const BASE_FOV = 62;
-const SPEED_FOV = 24; // added at SPEED_FOR_MAX_FOV
-const BOOST_FOV = 10;
+const BASE_FOV = 60;
+const SPEED_FOV = 10; // added at SPEED_FOR_MAX_FOV: enough to feel the speed, not so much the world shrinks away
+const BOOST_FOV = 6;
 const SPEED_FOR_MAX_FOV = 70; // m/s
 const FOCUS_HEIGHT = 1.3;
 const WALL_MARGIN = 0.35;
+const MAX_LAG = 0.6; // m the chase camera may fall behind where it wants to be (hard acceleration)
+// Looking around (mouse drag, right stick): how fast the view follows the input, and how it settles back
+const LOOK_FOLLOW = 14; // 1/s
+const LOOK_RETURN = 3.2; // 1/s, once the input is let go
+const LOOK_RETURN_DELAY = 0.35; // s held where it was before it starts to settle back
+
+/** Where the player is looking, relative to straight ahead: yaw (+ right) and pitch (+ up), radians. */
+export interface Look {
+  yaw: number;
+  pitch: number;
+  active: boolean; // input held; when let go the view settles back behind the car
+}
 
 export type CameraMode = 'chase' | 'chase_far' | 'hood' | 'cockpit' | 'drone';
 const MODES: CameraMode[] = ['chase', 'chase_far', 'hood', 'cockpit', 'drone'];
@@ -24,6 +36,9 @@ export class ChaseCamera {
   private time = 0;
   private orbit = 0;
   private snapped = false;
+  private lookYaw = 0;
+  private lookPitch = 0;
+  private lookIdle = 0; // s since the look input was let go
 
   toggle(): CameraMode {
     const nextIdx = (MODES.indexOf(this.mode) + 1) % MODES.length;
@@ -58,6 +73,24 @@ export class ChaseCamera {
     this.snapped = false;
   }
 
+  /** Feed the look input each frame, before update(). */
+  look(dt: number, look: Look): void {
+    if (look.active) {
+      this.lookIdle = 0;
+      const k = 1 - Math.exp(-dt * LOOK_FOLLOW);
+      // The short way round, so a stick swinging past 180° doesn't spin the view
+      const dy = Math.atan2(Math.sin(look.yaw - this.lookYaw), Math.cos(look.yaw - this.lookYaw));
+      this.lookYaw += dy * k;
+      this.lookPitch += (look.pitch - this.lookPitch) * k;
+      return;
+    }
+    this.lookIdle += dt;
+    if (this.lookIdle < LOOK_RETURN_DELAY) return;
+    const k = 1 - Math.exp(-dt * LOOK_RETURN);
+    this.lookYaw -= Math.atan2(Math.sin(this.lookYaw), Math.cos(this.lookYaw)) * k;
+    this.lookPitch -= this.lookPitch * k;
+  }
+
   update(dt: number, car: Car, clearance: Clearance): void {
     this.time += dt;
     const speedT = Math.min(1, car.speed / SPEED_FOR_MAX_FOV);
@@ -72,17 +105,15 @@ export class ChaseCamera {
     const p = car.body.translation();
     this.carPos.set(p.x, p.y, p.z);
 
-    if (this.mode === 'cockpit') {
-      this.camera.position.copy(car.visual.eye).applyQuaternion(car.mesh.quaternion).add(this.carPos);
-      this.camera.lookAt(this.tmp.copy(car.forward).multiplyScalar(20).add(this.camera.position));
-      return;
-    }
-
-    if (this.mode === 'hood') {
-      const noseX = car.visual.chassisCenter.x + car.visual.chassisHalf.x * 0.72;
-      const hoodOffset = new THREE.Vector3(noseX, 0.78, 0);
-      this.camera.position.copy(hoodOffset).applyQuaternion(car.mesh.quaternion).add(this.carPos);
-      this.camera.lookAt(this.tmp.copy(car.forward).multiplyScalar(30).add(this.camera.position));
+    if (this.mode === 'cockpit' || this.mode === 'hood') {
+      // In the car: the head turns (yaw about the car's up, pitch about its right)
+      const at = this.mode === 'cockpit'
+        ? car.visual.eye.clone()
+        : new THREE.Vector3(car.visual.chassisCenter.x + car.visual.chassisHalf.x * 0.72, 0.78, 0);
+      this.camera.position.copy(at).applyQuaternion(car.mesh.quaternion).add(this.carPos);
+      const view = new THREE.Vector3(Math.cos(this.lookPitch) * Math.cos(this.lookYaw), Math.sin(this.lookPitch), Math.cos(this.lookPitch) * Math.sin(this.lookYaw));
+      view.applyQuaternion(car.mesh.quaternion);
+      this.camera.lookAt(this.tmp.copy(view).multiplyScalar(25).add(this.camera.position));
       return;
     }
 
@@ -98,15 +129,16 @@ export class ChaseCamera {
     if (!this.snapped) this.dir.copy(target);
     else this.dir.lerp(target, 1 - Math.exp(-dt * 5)).normalize();
 
-    let distance = 5.4 + 1.4 * speedT;
-    let height = 2.0 + 0.3 * speedT;
+    // Close behind: pulls back a little with speed (the lag below adds a little more under hard acceleration)
+    let distance = 4.5 + 0.5 * speedT;
+    let height = 1.7 + 0.15 * speedT;
     let focusHeight = FOCUS_HEIGHT;
     let lookAhead = 3;
-    let lookTargetY = 1.1;
+    let lookTargetY = 1.05;
 
     if (this.mode === 'chase_far') {
-      distance = 7.5 + 2.2 * speedT;
-      height = 2.8 + 0.5 * speedT;
+      distance = 6.6 + 1.2 * speedT;
+      height = 2.5 + 0.3 * speedT;
       focusHeight = 1.4;
       lookAhead = 3.5;
       lookTargetY = 1.25;
@@ -118,11 +150,24 @@ export class ChaseCamera {
       lookTargetY = 0.5;
     }
 
-    const desired = this.tmp.copy(this.dir).multiplyScalar(-distance).add(this.carPos);
-    desired.y += height;
+    // Looking around orbits the camera about the car: yaw round it, pitch up and over it
+    const looking = Math.abs(this.lookYaw) > 0.02 || Math.abs(this.lookPitch) > 0.02;
+    const cy = Math.cos(this.lookYaw);
+    const sy = Math.sin(this.lookYaw);
+    const orbitX = this.dir.x * cy - this.dir.z * sy;
+    const orbitZ = this.dir.x * sy + this.dir.z * cy;
+    const pitch = THREE.MathUtils.clamp(this.lookPitch, -0.15, 1.1);
+    const flat = distance * Math.cos(pitch);
+    const desired = this.tmp.set(-orbitX * flat, 0, -orbitZ * flat).add(this.carPos);
+    desired.y += height + distance * Math.sin(pitch);
     if (!this.snapped) this.pos.copy(desired);
-    else this.pos.lerp(desired, 1 - Math.exp(-dt * 12)); // slight lag reads as acceleration
-    this.pos.y = Math.max(this.pos.y, 0.6);
+    else {
+      this.pos.lerp(desired, 1 - Math.exp(-dt * (looking ? 20 : 12))); // slight lag reads as acceleration
+      // …but never so much that the car runs away from the camera
+      const behind = this.pos.distanceTo(desired);
+      if (behind > MAX_LAG) this.pos.lerp(desired, 1 - MAX_LAG / behind);
+    }
+    this.pos.y = Math.max(this.pos.y, this.carPos.y + 0.6); // never down in the road
     this.snapped = true;
 
     // Pull in front of any wall between the car and the camera
@@ -138,6 +183,8 @@ export class ChaseCamera {
       eye.y + Math.sin(this.time * 45 + 1.3) * shake,
       eye.z + Math.sin(this.time * 41 + 2.1) * shake,
     );
-    this.camera.lookAt(this.carPos.x + this.dir.x * lookAhead, this.carPos.y + lookTargetY, this.carPos.z + this.dir.z * lookAhead);
+    // Ahead of the car normally; at the car itself while looking around it
+    const ahead = looking ? lookAhead * Math.max(0, Math.cos(this.lookYaw)) : lookAhead;
+    this.camera.lookAt(this.carPos.x + this.dir.x * ahead, this.carPos.y + lookTargetY, this.carPos.z + this.dir.z * ahead);
   }
 }

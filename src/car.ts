@@ -19,6 +19,14 @@ const WORN_TOP_SPEED = 0.35; // share of top speed lost
 const WORN_PULL = 0.05; // rad/s of steering drift at full wear
 
 const AIR_LEVELING = 2500; // N·m per radian of tilt while airborne
+// Steering lock falls off with speed as limit = maxSteer / (1 + (v / STEER_FALLOFF)^STEER_FALLOFF_POWER):
+// full lock for parking, a calm few degrees on the highway (the tires couldn't use more anyway)
+const STEER_FALLOFF = 20; // m/s
+const STEER_FALLOFF_POWER = 1.3;
+// Stability assist (off while drifting or on the handbrake): yaw beyond what the steering asks for is
+// damped, so a twitch at speed doesn't become a spin
+const STABILITY = 2.6; // 1/s: how hard excess yaw is pulled back (times the car's yaw inertia)
+const STABILITY_MARGIN = 0.12; // rad/s of yaw beyond the asked-for rate before it steps in
 const AIR_DAMPING = 800;
 
 // Wheel order: front-left, front-right, rear-left, rear-right
@@ -55,6 +63,8 @@ export class Car {
   readonly velocity = new THREE.Vector3();
 
   private steerAngle = 0;
+  private readonly wheelbase: number;
+  private readonly yawInertia: number;
   private pull = 0; // steering bias a bent chassis gives, -1..1 (set by the first real hit)
   private prevSlip = 0;
   private prevHandbrake = false;
@@ -88,6 +98,8 @@ export class Car {
     };
     const wheels = this.visual.wheels;
     const comX = (wheels[0].center.x + wheels[2].center.x) / 2;
+    this.wheelbase = Math.max(2, Math.abs(wheels[0].center.x - wheels[2].center.x));
+    this.yawInertia = inertia.y;
     this.collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(h.x, h.y, h.z)
         .setTranslation(c.x, c.y, c.z)
@@ -132,10 +144,10 @@ export class Car {
 
     // Less steering lock at speed. While drifting, the front wheels auto-align with the direction of travel
     // and the player steers relative to that, so steering into a slide doesn't overdrive it into a spin.
-    const speedT = Math.min(1, Math.abs(this.forwardSpeed) / t.topSpeed);
+    const lock = Math.max(t.highSpeedSteer * 0.45, t.maxSteer / (1 + (Math.abs(this.forwardSpeed) / STEER_FALLOFF) ** STEER_FALLOFF_POWER));
     const targetSteer = drifting
       ? THREE.MathUtils.clamp(this.slip + c.steer * t.driftSteer, -t.driftLock, t.driftLock)
-      : c.steer * THREE.MathUtils.lerp(t.maxSteer, t.highSpeedSteer, speedT);
+      : c.steer * lock;
     const maxDelta = t.steerRate * (drifting ? 2 : 1) * dt;
     this.steerAngle += THREE.MathUtils.clamp(targetSteer - this.steerAngle, -maxDelta, maxDelta);
 
@@ -207,6 +219,8 @@ export class Car {
       this.body.applyImpulse(this.tmp.copy(this.up).multiplyScalar(-t.downforce * this.speed ** 2 * dt), true);
     }
 
+    if (!drifting && !c.handbrake && grounded && this.speed > 8) this.stabilize(dt);
+
     const slipRate = (this.slip - this.prevSlip) / dt;
     this.prevSlip = this.slip;
     if (drifting && grounded && this.speed > 4) {
@@ -242,6 +256,30 @@ export class Car {
     const sliding = drifting ? Math.min(1, Math.abs(this.slip) / 0.6) : 0;
     const locking = (c.handbrake || this.braking) && this.speed > 5 ? 0.6 : 0;
     this.skidAmount = grounded ? Math.max(sliding, locking) : 0;
+  }
+
+  /**
+   * Stability assist: the yaw rate the steering asks for (a bicycle model, capped at what the tires can
+   * hold), and a damping torque on any yaw beyond it. Only excess is taken away; it never steers for you.
+   */
+  private stabilize(dt: number): void {
+    const t = this.tuning;
+    const v = this.forwardSpeed;
+    // Turning right is negative yaw about +up
+    let wanted = (-v * Math.tan(this.steerAngle)) / this.wheelbase;
+    const grip = (Math.max(t.gripFront, t.gripRear) * GRAVITY * 1.15) / Math.max(1, Math.abs(v));
+    wanted = THREE.MathUtils.clamp(wanted, -grip, grip);
+    const yaw = this.body.angvel();
+    const r = yaw.x * this.up.x + yaw.y * this.up.y + yaw.z * this.up.z;
+    let excess = 0;
+    if (Math.sign(r) === Math.sign(wanted) || Math.abs(wanted) < 0.02) {
+      if (Math.abs(r) > Math.abs(wanted) + STABILITY_MARGIN) excess = r - Math.sign(r) * (Math.abs(wanted) + STABILITY_MARGIN);
+    } else if (Math.abs(r) > STABILITY_MARGIN) {
+      excess = r - Math.sign(r) * STABILITY_MARGIN; // turning against the steering: a slide the other way
+    }
+    if (excess === 0) return;
+    const torque = THREE.MathUtils.clamp(-excess * STABILITY * this.yawInertia, -t.mass * 30, t.mass * 30);
+    this.body.applyTorqueImpulse(this.tmp.copy(this.up).multiplyScalar(torque * dt), true);
   }
 
   /** Call right before world.step(), after fixedUpdate has applied this step's driving impulses. */

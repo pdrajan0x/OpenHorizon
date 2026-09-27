@@ -7,17 +7,19 @@ import { loadModCar, modCarVisual, type Template } from './modcar';
 import { BASE, GARAGE, RIVAL_GARAGE, type CarTuning } from './tuning';
 
 /** Garage order: number keys 1–9 pick these. */
-// Engine sounds come from sound mods of the closest real engines (public/mods/audio)
+// Engine sounds come from sound mods of each car's own engine, or its closest relative
+// (public/mods/audio): the Huracán's V10 is the Audi R8's, the SF90's twin-turbo V8 the 488's, the 812
+// and FXX-K share the LaFerrari's V12, the Centenario the Aventador's, the Bugattis a W16 quad-turbo
 const CARS = [
-  { id: 'lambo-huracan', paint: 0x6fbf1f, engine: 'lambo-v12' },
+  { id: 'lambo-huracan', paint: 0x6fbf1f, engine: 'audi-v10' },
   { id: 'ferrari-sf90', paint: 0xc4121c, engine: 'ferrari-v8' },
-  { id: 'bugatti-chiron', paint: 0x1f4fbf, engine: 'hyper-v8' },
+  { id: 'bugatti-chiron', paint: 0x1f4fbf, engine: 'bugatti-w16' },
   { id: 'lambo-centenario', paint: 0x2a2d33, engine: 'lambo-v12' },
   { id: 'ferrari-812', paint: 0xd8d8dc, engine: 'ferrari-v12' },
-  { id: 'bugatti-divo', paint: 0x3fa9d6, engine: 'hyper-v8' },
+  { id: 'bugatti-divo', paint: 0x3fa9d6, engine: 'bugatti-w16' },
   { id: 'lambo-terzo', paint: 0xe8e8ec, engine: 'lambo-v12' },
   { id: 'ferrari-fxxk', paint: 0xcf1a1a, engine: 'ferrari-v12' },
-  { id: 'bugatti-bolide', paint: 0x14161c, engine: 'hyper-v8' },
+  { id: 'bugatti-bolide', paint: 0x14161c, engine: 'bugatti-w16' },
 ];
 
 interface Spec {
