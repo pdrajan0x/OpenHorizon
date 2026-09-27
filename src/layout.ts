@@ -29,6 +29,12 @@ export interface LayoutLink {
   rank: number;
 }
 
+/** A world design: rough centres in km (x north, z east) and the links, [a, b, rank]. */
+export interface Design {
+  at: Record<string, [number, number]>;
+  links: [string, string, number][];
+}
+
 /** Rough centres in km, x north and z east. */
 const DESIGN: Record<string, [number, number]> = {
   'carla-town12': [0, -20],
@@ -47,6 +53,9 @@ const LINKS: [string, string, number][] = [
   ['chicago', 'french-riviera', 1], ['chicago', 'lordcity', 1], ['french-riviera', 'lordcity', 1], ['french-riviera', 'ugase-city', 1],
   ['lordcity', 'akina', 0], ['lordcity', 'ugase-city', 0], ['ugase-city', 'shibuya', 0], ['akina', 'tsukuba', 0], ['tsukuba', 'shibuya', 0],
 ];
+
+/** The world the game builds. scripts/layout-variants.mjs tries others. */
+export const WORLD: Design = { at: DESIGN, links: LINKS };
 
 const CHANNEL = 550; // m of sea between linked cities' land
 const MIN_GAP = 500; // m of sea at least between any two cities
@@ -93,11 +102,11 @@ function separate(a: Body, b: Body, want: number): void {
  * Where each city goes (the offset of its own frame, or null for a city the design doesn't name) and the
  * links to build.
  */
-export function worldLayout(list: { id: string; rect: Rect }[]): { placed: ([number, number] | null)[]; links: LayoutLink[] } {
+export function worldLayout(list: { id: string; rect: Rect }[], design: Design = WORLD): { placed: ([number, number] | null)[]; links: LayoutLink[] } {
   const bodies: Body[] = [];
   const byId = new Map<string, Body>();
   list.forEach((l, k) => {
-    const at = DESIGN[l.id];
+    const at = design.at[l.id];
     if (!at) return;
     const b = { k, x: at[0] * 1000, z: at[1] * 1000, hx: (l.rect[2] - l.rect[0]) / 2, hz: (l.rect[3] - l.rect[1]) / 2, hx0: at[0] * 1000, hz0: at[1] * 1000 };
     bodies.push(b);
@@ -105,7 +114,7 @@ export function worldLayout(list: { id: string; rect: Rect }[]): { placed: ([num
   });
   const placed: ([number, number] | null)[] = list.map(() => null);
   const links: LayoutLink[] = [];
-  const designed = LINKS.map(([a, b, rank]) => [byId.get(a), byId.get(b), rank] as const)
+  const designed = design.links.map(([a, b, rank]) => [byId.get(a), byId.get(b), rank] as const)
     .filter((l): l is readonly [Body, Body, number] => !!l[0] && !!l[1]);
   const linked = new Set(designed.map(([a, b]) => `${Math.min(a.k, b.k)},${Math.max(a.k, b.k)}`));
   const isLinked = (a: Body, b: Body) => linked.has(`${Math.min(a.k, b.k)},${Math.max(a.k, b.k)}`);
