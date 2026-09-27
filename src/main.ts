@@ -123,7 +123,7 @@ async function main(): Promise<void> {
       routeWaypoint();
     }
     worldMap.refresh(mapExtras());
-  });
+  }, (at) => void teleport(at));
   const mapExtras = () => ({
     events: events.mapMarkers(),
     rivals: rivals.rivals.map((r) => {
@@ -176,6 +176,28 @@ async function main(): Promise<void> {
     const pose = map.roads.roadPose(p.x, p.z, player.heading);
     place(pose.position, pose.yaw);
   };
+  // Spawning from the map (Shift+click, or T at the GPS pin): the road nearest the point, with that city
+  // streamed in first so the car lands on solid ground. Not during an event or a crash
+  let teleporting = false;
+  const teleport = async (at: THREE.Vector2) => {
+    if (teleporting) return;
+    if (events.running || crash) {
+      hud.note(events.running ? 'LEAVE THE EVENT TO SPAWN ELSEWHERE' : 'WAIT FOR THE CRASH TO END', 'info');
+      return;
+    }
+    teleporting = true;
+    const pose = map.roads.roadPose(at.x, at.y, player.heading);
+    await map.prime(pose.position);
+    teleporting = false;
+    if (worldMap.open) worldMap.toggle();
+    if (wreck) {
+      player.repair();
+      wreck = null;
+    }
+    place(pose.position, pose.yaw);
+    hud.banner('SPAWNED', map.islandAt(pose.position).info.name, 'info', 1.2);
+  };
+
   // After a wreck: a new car on the nearest road
   const newCar = () => {
     player.repair();

@@ -1,8 +1,9 @@
 // The full-screen map (M): every island's streets on the open sea, north up, with the events, rivals,
 // the GPS route and the player. The game pauses while it's open; M or Escape goes back to driving.
 // Mouse wheel or +/- zooms, dragging or the arrow keys pan. Click any city label to jump to it; click
-// anywhere else to set a GPS waypoint, right-click or Delete to clear it. The view stays where you
-// left it between visits (F fits everything again).
+// anywhere else to set a GPS waypoint, right-click or Delete to clear it. Shift+click spawns the car
+// there instead (on a city label: in that city), T at the waypoint. The view stays where you left it
+// between visits (F fits everything again).
 import * as THREE from 'three';
 import type { Islands } from './islands';
 import { MapTiles, type MapExtras } from './minimap';
@@ -31,6 +32,8 @@ export class WorldMap {
     private readonly onToggle: (open: boolean) => void,
     /** A GPS waypoint was set (world x, z) or cleared (null). */
     private readonly onWaypoint: (at: THREE.Vector2 | null) => void = () => {},
+    /** Drive from here (world x, z): Shift+click, or T at the waypoint. */
+    private readonly onSpawn: (at: THREE.Vector2) => void = () => {},
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'worldmap';
@@ -64,6 +67,7 @@ export class WorldMap {
         else if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.zoom(1 / 1.4);
         else if (e.code === 'KeyF') this.fitAll();
         else if (e.code === 'Delete' || e.code === 'Backspace') this.setWaypoint(null);
+        else if (e.code === 'KeyT' && this.waypoint) this.onSpawn(this.waypoint.clone());
         else if (e.code.startsWith('Arrow')) this.pan(e.code);
         else return;
         e.stopImmediatePropagation();
@@ -103,11 +107,13 @@ export class WorldMap {
     this.canvas.addEventListener('pointerup', (e) => {
       if (this.drag && !this.drag.moved) {
         // A click without dragging: a city label zooms to that city, the waypoint marker clears it,
-        // anywhere else sets the waypoint there
+        // anywhere else sets the waypoint there. With Shift, the car goes there instead
         const clickX = e.clientX;
         const clickY = e.clientY;
         const label = this.labels.find((l) => l.box && clickX >= l.box.x0 && clickX <= l.box.x1 && clickY >= l.box.y0 && clickY <= l.box.y1);
-        if (label) {
+        if (e.shiftKey) {
+          this.onSpawn(label ? new THREE.Vector2(label.x, label.z) : this.toWorld(clickX, clickY));
+        } else if (label) {
           this.centre.set(label.x, label.z);
           this.scale = 0.15;
           this.draw();
@@ -389,7 +395,7 @@ export class WorldMap {
     g.textAlign = 'left';
     g.font = '13px system-ui, sans-serif';
     g.fillStyle = 'rgba(232, 244, 255, 0.9)';
-    g.fillText('MAP — M / Esc back · Click a city to focus · Click the map to set GPS, right-click / Del to clear · Wheel / +/- zoom · Drag / arrows pan · F fit all', 18, h - 20);
+    g.fillText('MAP — M / Esc back · Click a city to focus · Click the map to set GPS, right-click / Del to clear · Shift+click to spawn there, T at the GPS pin · Wheel / +/- zoom · Drag / arrows pan · F fit all', 18, h - 20);
 
     let lx = 18;
     for (const [label, colour] of LEGEND) {
