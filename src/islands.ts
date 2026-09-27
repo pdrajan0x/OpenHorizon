@@ -359,6 +359,8 @@ export class Islands {
     // doesn't recompute thousands of them. Cells that stream in later compute their own (map.ts).
     this.root.traverse((o) => { o.matrixAutoUpdate = false; o.updateMatrix(); });
     this.root.updateMatrixWorld(true);
+    // …and the renderer's per-frame pass over the scene skips this whole subtree (thousands of meshes)
+    this.root.updateMatrixWorld = () => {};
     this.roads = new RoadGraph(roads);
     this.spawn = maps[0].spawn.clone();
   }

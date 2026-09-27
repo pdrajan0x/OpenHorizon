@@ -71,6 +71,99 @@ function shadeMaterial(m: THREE.MeshStandardMaterial): void {
   };
 }
 
+/**
+ * GTA's specular model on a physical material. The spec map says where a surface shines (windows,
+ * polished stone, paint) and specularFalloffMult how tightly: a Blinn-Phong exponent, which becomes
+ * that spot's roughness. Everything the map leaves dark stays matte.
+ */
+function specMaterial(m: THREE.MeshStandardMaterial, spec: THREE.Texture, gloss: number, strength: number): void {
+  m.defines = { ...m.defines, USE_SPECMASK: '' };
+  const own = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    own.call(m, shader, renderer);
+    shader.uniforms.specMask = { value: spec };
+    shader.uniforms.specGloss = { value: gloss };
+    shader.uniforms.specStrength = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D specMask;\nuniform float specGloss;\nuniform float specStrength;')
+      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = roughness;
+        #ifdef USE_MAP
+          vec3 specTexel = texture2D( specMask, vMapUv ).rgb;
+          float specAmt = clamp( max( specTexel.r, max( specTexel.g, specTexel.b ) ) * specStrength, 0.0, 1.0 );
+          roughnessFactor = mix( roughness, specGloss, specAmt );
+        #endif`);
+  };
+}
+
+/**
+ * Detail maps: fine surface grain (Poly Haven plaster for walls, asphalt for roads; public/mods/coast/)
+ * blended into every city surface up close, so low-resolution map textures read as real material.
+ * Mapped by world position on the plane the surface mostly faces, faded out by DETAIL_FAR m.
+ */
+const DETAIL_NEAR = 12;
+const DETAIL_FAR = 60;
+type DetailSet = { normal: THREE.Texture; rough: THREE.Texture };
+let detailSets: Promise<{ wall: DetailSet; road: DetailSet } | null> | null = null;
+function loadDetail(): Promise<{ wall: DetailSet; road: DetailSet } | null> {
+  const loader = new THREE.TextureLoader();
+  const load = (id: string, kind: string) => loader.loadAsync(`/mods/coast/${id}/${id}_${kind}_2k.jpg`).then((t) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  });
+  const set = async (id: string) => ({ normal: await load(id, 'nor_gl'), rough: await load(id, 'Rough') });
+  return (detailSets ??= Promise.all([set('grey_plaster'), set('asphalt_02')])
+    .then(([wall, road]) => ({ wall, road }))
+    .catch(() => null));
+}
+
+function detailMaterial(m: THREE.MeshStandardMaterial, set: DetailSet, scale: number, strength: number): void {
+  m.defines = { ...m.defines, USE_DETAIL: '' };
+  const own = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    own.call(m, shader, renderer);
+    Object.assign(shader.uniforms, {
+      detailNormal: { value: set.normal }, detailRough: { value: set.rough },
+      detailScale: { value: scale }, detailStrength: { value: strength },
+    });
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDetailPos;\nvarying vec3 vDetailNrm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDetailPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvDetailNrm = normalize(mat3(modelMatrix) * objectNormal);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vDetailPos;
+        varying vec3 vDetailNrm;
+        uniform sampler2D detailNormal;
+        uniform sampler2D detailRough;
+        uniform float detailScale;
+        uniform float detailStrength;
+        // The plane a surface mostly faces: its uv there, and which world axes the map's x and y run along
+        vec2 detailUv(vec3 p, vec3 n, out vec3 ax, out vec3 ay) {
+          vec3 a = abs(n);
+          if (a.y > 0.7) { ax = vec3(1.0, 0.0, 0.0); ay = vec3(0.0, 0.0, 1.0); return p.xz; }
+          if (a.x > a.z) { ax = vec3(0.0, 0.0, 1.0); ay = vec3(0.0, 1.0, 0.0); return p.zy; }
+          ax = vec3(1.0, 0.0, 0.0); ay = vec3(0.0, 1.0, 0.0); return p.xy;
+        }`)
+      .replace('#include <metalnessmap_fragment>', `
+        vec3 dAx; vec3 dAy;
+        float detailFade = 1.0 - smoothstep(${DETAIL_NEAR.toFixed(1)}, ${DETAIL_FAR.toFixed(1)}, distance(vDetailPos, cameraPosition));
+        vec2 dUv = detailUv(vDetailPos, normalize(vDetailNrm), dAx, dAy) * detailScale;
+        roughnessFactor = clamp(roughnessFactor * mix(1.0, 0.75 + 0.5 * texture2D(detailRough, dUv).g, detailFade), 0.04, 1.0);
+        #include <metalnessmap_fragment>`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        if (detailFade > 0.0) {
+          vec3 dT = texture2D(detailNormal, dUv).xyz * 2.0 - 1.0;
+          vec3 dWorld = (dAx * dT.x + dAy * dT.y) * detailStrength * detailFade;
+          normal = normalize(normal + (viewMatrix * vec4(dWorld, 0.0)).xyz);
+        }`);
+  };
+}
+
+/** Roughness for a GTA specular falloff (Blinn-Phong exponent n): α = √(2 / (n + 2)), roughness = √α. */
+function glossRoughness(falloff: number): number {
+  return THREE.MathUtils.clamp(Math.pow(2 / (Math.max(1, falloff) + 2), 0.25), 0.08, 0.9);
+}
+
 let fetching = 0;
 const queued: (() => void)[] = [];
 /** fetch() a few at a time, retried on network errors; the body, or null for an HTTP error. */
@@ -115,6 +208,11 @@ interface MaterialInfo {
   emissive: boolean;
   blend: boolean;
   mask: boolean;
+  /** GTA specular data, when the map was converted with it: the spec map, its strength and falloff (a Blinn-Phong exponent), the normal map's strength. */
+  spec?: string;
+  specIntensity?: number;
+  specFalloff?: number;
+  bump?: number;
 }
 export interface Manifest {
   origin: number[];
@@ -469,9 +567,11 @@ export class GameMap {
 
   private async makeMaterial(i: number, shaded: boolean): Promise<THREE.Material> {
     const m = this.manifest.materials[i];
-    const [map, normalMap] = await Promise.all([
+    const [map, normalMap, specMap, detail] = await Promise.all([
       m.diffuse ? this.texture(m.diffuse, true) : null,
       m.normal ? this.texture(m.normal, false) : null,
+      m.spec ? this.texture(m.spec, false) : null,
+      EFFECTS.detail ? loadDetail() : null,
     ]);
     if (m.shader.includes('shadow_proxy')) {
       const proxy = new THREE.MeshStandardMaterial({ colorWrite: false, depthWrite: false });
@@ -498,21 +598,23 @@ export class GameMap {
     const isRoad = m.shader.includes('terrain') || (m.diffuse && /road|asphalt|tarmac|pavement/i.test(m.diffuse));
     const isMetal = m.shader.includes('metal') || (m.diffuse && /metal|chrome|steel/i.test(m.diffuse));
 
-    let roughness = 0.75;
+    // Matte unless the material says otherwise: a faint sheen on everything is what makes a city look
+    // like plastic. GTA's own specular data (map, strength, falloff) decides what shines.
+    let roughness = 0.9;
     let metalness = 0.0;
+    const gloss = glossRoughness(m.specFalloff ?? 100);
+    const strength = m.specIntensity ?? 1;
 
     if (isGlass) {
-      roughness = 0.1;
-      metalness = 0.9;
-    } else if (isRoad) {
-      roughness = 0.45; // Wet/smooth asphalt look
-      metalness = 0.05;
+      roughness = 0.05;
+      metalness = 0.2;
     } else if (isMetal) {
-      roughness = 0.25;
+      roughness = specMap ? 0.6 : 0.3;
       metalness = 0.85;
-    } else if (spec) {
-      roughness = 0.4;
-      metalness = 0.1;
+    } else if (!specMap && (spec || m.specIntensity !== undefined)) {
+      roughness = THREE.MathUtils.lerp(0.9, gloss, THREE.MathUtils.clamp(strength, 0, 1) * 0.6);
+    } else if (isRoad) {
+      roughness = 0.8;
     }
 
     const mat = new THREE.MeshStandardMaterial({
@@ -526,7 +628,9 @@ export class GameMap {
       alphaTest: m.mask ? 0.5 : 0,
       side: m.mask ? THREE.DoubleSide : THREE.FrontSide,
     });
-    if (normalMap) mat.normalScale.set(1, -1); // GTA normal maps are DirectX-style (green down)
+    // GTA normal maps are DirectX-style (green down), at the strength the author set
+    const bump = THREE.MathUtils.clamp(m.bump ?? 1, 0, 2.5);
+    if (normalMap) mat.normalScale.set(bump, -bump);
     if (m.emissive && map) {
       mat.emissiveMap = map;
       mat.emissive.set(0xffffff);
@@ -535,6 +639,11 @@ export class GameMap {
       this.applyNight(mat);
     }
     if (shaded && EFFECTS.shade) shadeMaterial(mat);
+    if (specMap && !isGlass && !m.blend) specMaterial(mat, specMap, gloss, strength);
+    if (detail && !isGlass && !m.blend && !m.mask && !m.emissive) {
+      if (isRoad) detailMaterial(mat, detail.road, 0.3, 0.55);
+      else detailMaterial(mat, detail.wall, 0.45, 0.45);
+    }
     litMaterials.add(mat);
     applyLighting(mat);
     return mat;

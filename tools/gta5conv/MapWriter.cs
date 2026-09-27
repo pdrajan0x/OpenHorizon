@@ -53,8 +53,11 @@ static class MapWriter
     class MaterialInfo
     {
         public int Index;
-        public string Shader = "", Diffuse, Normal;
+        public string Shader = "", Diffuse, Normal, Spec;
         public bool Emissive, Blend, Mask;
+        // GTA's specular controls: how strong (specularIntensityMult), how tight (specularFalloffMult),
+        // and the normal map's strength (bumpiness); NaN where the shader doesn't set them
+        public float SpecIntensity = float.NaN, SpecFalloff = float.NaN, Bumpiness = float.NaN;
     }
 
     public static void Write(ModFiles mod, string outDir, string[] args)
@@ -560,6 +563,7 @@ static class MapWriter
                     var m = matList[mi / 2];
                     if (m.Diffuse != null) cellTex.Add(m.Diffuse);
                     if (m.Normal != null) cellTex.Add(m.Normal);
+                    if (m.Spec != null) cellTex.Add(m.Spec);
                     for (int i = 0; i < b.Pos.Count; i += 3)
                     {
                         var p = new Vector3(b.Pos[i], b.Pos[i + 1], b.Pos[i + 2]);
@@ -614,12 +618,20 @@ static class MapWriter
             else missingTex.Add(name + $"({t.Format})");
         }
 
-        var matJson = new JsonArray(matList.Select(m => (JsonNode)new JsonObject
+        var matJson = new JsonArray(matList.Select(m =>
         {
-            ["shader"] = m.Shader,
-            ["diffuse"] = m.Diffuse != null && !missingTex.Contains(m.Diffuse) ? Safe(m.Diffuse) : null,
-            ["normal"] = m.Normal != null && !missingTex.Contains(m.Normal) ? Safe(m.Normal) : null,
-            ["emissive"] = m.Emissive, ["blend"] = m.Blend, ["mask"] = m.Mask,
+            var o = new JsonObject
+            {
+                ["shader"] = m.Shader,
+                ["diffuse"] = m.Diffuse != null && !missingTex.Contains(m.Diffuse) ? Safe(m.Diffuse) : null,
+                ["normal"] = m.Normal != null && !missingTex.Contains(m.Normal) ? Safe(m.Normal) : null,
+                ["emissive"] = m.Emissive, ["blend"] = m.Blend, ["mask"] = m.Mask,
+            };
+            if (m.Spec != null && !missingTex.Contains(m.Spec)) o["spec"] = Safe(m.Spec);
+            if (!float.IsNaN(m.SpecIntensity)) o["specIntensity"] = MathF.Round(m.SpecIntensity, 3);
+            if (!float.IsNaN(m.SpecFalloff)) o["specFalloff"] = MathF.Round(m.SpecFalloff, 1);
+            if (!float.IsNaN(m.Bumpiness)) o["bump"] = MathF.Round(m.Bumpiness, 3);
+            return (JsonNode)o;
         }).ToArray());
         // Spawn at the road node nearest the middle, or the middle itself
         var spawn = new JsonArray(0.0, 30.0, 0.0);
@@ -723,20 +735,30 @@ static class MapWriter
     static MaterialInfo MaterialFor(ShaderFX s, Dictionary<string, MaterialInfo> materials)
     {
         var shader = ShaderNames.Of(s);
-        string diffuse = null, normal = null;
+        string diffuse = null, normal = null, spec = null;
+        float specIntensity = float.NaN, specFalloff = float.NaN, bumpiness = float.NaN;
         var pl = s?.ParametersList;
         for (int i = 0; i < (pl?.Parameters?.Length ?? 0); i++)
         {
-            if (pl.Parameters[i].Data is not TextureBase tb || string.IsNullOrEmpty(tb.Name)) continue;
             var p = pl.Hashes[i].ToString().ToLowerInvariant();
+            if (pl.Parameters[i].Data is Vector4 v)
+            {
+                if (p == "specularintensitymult") specIntensity = v.X;
+                else if (p == "specularfalloffmult") specFalloff = v.X;
+                else if (p == "bumpiness") bumpiness = v.X;
+                continue;
+            }
+            if (pl.Parameters[i].Data is not TextureBase tb || string.IsNullOrEmpty(tb.Name)) continue;
             if (p == "diffusesampler" || (diffuse == null && p.Contains("diffuse"))) diffuse = tb.Name;
             else if (p == "bumpsampler" && !tb.Name.Contains("blank")) normal = tb.Name;
+            else if (p == "specsampler" && !tb.Name.Contains("blank")) spec = tb.Name;
         }
-        var key = $"{shader}|{diffuse}|{normal}";
+        var key = $"{shader}|{diffuse}|{normal}|{spec}|{specIntensity}|{specFalloff}|{bumpiness}";
         if (materials.TryGetValue(key, out var m)) return m;
         m = new MaterialInfo
         {
-            Index = materials.Count, Shader = shader, Diffuse = diffuse, Normal = normal,
+            Index = materials.Count, Shader = shader, Diffuse = diffuse, Normal = normal, Spec = spec,
+            SpecIntensity = specIntensity, SpecFalloff = specFalloff, Bumpiness = bumpiness,
             Emissive = shader.Contains("emissive"),
             Blend = shader.Contains("alpha") || shader.Contains("decal") || shader.Contains("glass"),
             Mask = shader.Contains("cutout") || shader.Contains("trees") || shader.Contains("grass"),

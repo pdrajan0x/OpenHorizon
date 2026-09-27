@@ -19,10 +19,21 @@ interface Look {
   bloom: Bloom;
 }
 const LOOKS: Record<TimeOfDay, Look> = {
-  day: { exposure: 0.7, sun: 1.6, environment: 0.7, fog: 0.0004, night: 0, bloom: { strength: 0.25, radius: 0.3, threshold: 4 } },
-  sunset: { exposure: 0.55, sun: 1.6, environment: 0.6, fog: 0.0004, night: 0.35, bloom: { strength: 0.45, radius: 0.35, threshold: 3 } },
+  // A strong sun against a dimmer sky: the contrast between sunlit and shaded faces is what gives the
+  // city depth (an even sky light flattens it)
+  day: { exposure: 0.9, sun: 3.2, environment: 0.45, fog: 0.0004, night: 0, bloom: { strength: 0.25, radius: 0.3, threshold: 4 } },
+  sunset: { exposure: 0.7, sun: 3.0, environment: 0.42, fog: 0.0004, night: 0.35, bloom: { strength: 0.45, radius: 0.35, threshold: 3 } },
   night: { exposure: 1.8, sun: 0.2, environment: 1.4, fog: 0.0006, night: 1, bloom: { strength: 1.2, radius: 0.5, threshold: 0.7 } },
 };
+/** The look for a time of day; ?look=sun:3,environment:0.5,exposure:0.8 overrides numbers (for tuning). */
+function tunedLook(time: TimeOfDay): Look {
+  const look = { ...LOOKS[time] };
+  for (const pair of (new URLSearchParams(location.search).get('look') ?? '').split(',')) {
+    const [k, v] = pair.split(':');
+    if (k in look && k !== 'bloom' && Number.isFinite(Number(v))) (look as unknown as Record<string, number>)[k] = Number(v);
+  }
+  return look;
+}
 const HORIZON_BLEND = 0.05; // fraction of the photograph's height above the horizon faded into haze
 // Sun shadows: two cascades out to SHADOW_DISTANCE, soft PCF. None at night (the "sun" is moonlight).
 const SHADOW_DISTANCE = 250;
@@ -43,7 +54,7 @@ export class Atmosphere {
   private frames = 0;
 
   private constructor(private readonly scene: THREE.Scene, sky: THREE.DataTexture, environment: THREE.Texture, readonly time: TimeOfDay, rain: boolean) {
-    this.look = LOOKS[time];
+    this.look = tunedLook(time);
     scene.background = sky;
     scene.environment = environment;
     scene.environmentIntensity = this.look.environment;
@@ -60,13 +71,19 @@ export class Atmosphere {
   }
 
   static async load(renderer: THREE.WebGLRenderer, scene: THREE.Scene, time: TimeOfDay, rain = false): Promise<Atmosphere> {
-    const sky = await new HDRLoader().loadAsync(`/mods/sky/${time}.hdr`);
+    // ?sky=<name> tries another photograph from public/mods/sky/ (for choosing skies)
+    const sky = await new HDRLoader().loadAsync(`/mods/sky/${new URLSearchParams(location.search).get('sky') ?? time}.hdr`);
     sky.mapping = THREE.EquirectangularReflectionMapping;
     seaBelowHorizon(sky);
     const pmrem = new THREE.PMREMGenerator(renderer);
     const environment = pmrem.fromEquirectangular(sky).texture;
     pmrem.dispose();
-    renderer.toneMappingExposure = LOOKS[time].exposure;
+    renderer.toneMappingExposure = tunedLook(time).exposure;
+    // Khronos PBR Neutral by day keeps surfaces the colour of their textures (ACES darkens and
+    // desaturates brick, paint and glass); night keeps ACES's richer neon. ?tm=aces|agx|neutral to compare.
+    const tm = new URLSearchParams(location.search).get('tm');
+    renderer.toneMapping = tm === 'agx' ? THREE.AgXToneMapping : tm === 'aces' ? THREE.ACESFilmicToneMapping
+      : tm === 'neutral' || time !== 'night' ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
     return new Atmosphere(scene, sky, environment, time, rain);
   }
 

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { N8AOPass } from 'n8ao';
 import { EFFECTS } from './quality';
@@ -16,8 +18,43 @@ export interface Bloom {
 const NIGHT_BLOOM: Bloom = { strength: 0.85, radius: 0.4, threshold: 0.9 };
 
 /**
+ * The grade, on the finished (display) image: a gentle filmic S-curve for contrast, a little more
+ * colour, a touch of warmth in the highlights and cool in the shadows, and a soft vignette.
+ * ?grade=0 turns it off for comparison.
+ */
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    contrast: { value: 0.16 },
+    saturation: { value: 1.15 },
+    vignette: { value: 0.22 },
+  },
+  vertexShader: `varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse;
+    uniform float contrast;
+    uniform float saturation;
+    uniform float vignette;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 col = c.rgb;
+      // S-curve around mid grey
+      col = mix(col, col * col * (3.0 - 2.0 * col), contrast);
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, saturation);
+      // Split tone: warm highlights, cool shadows
+      col += vec3(0.02, 0.01, -0.015) * smoothstep(0.45, 1.0, l) + vec3(-0.01, 0.0, 0.015) * (1.0 - smoothstep(0.0, 0.35, l));
+      // Vignette
+      vec2 d = vUv - 0.5;
+      col *= 1.0 - vignette * smoothstep(0.35, 0.85, length(d * vec2(1.25, 1.0)));
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a);
+    }`,
+};
+
+/**
  * Scene render with ambient occlusion (N8AO, half resolution; a plain render at ?quality=low) → bloom
- * (half resolution internally) → tone mapping + sRGB output.
+ * (half resolution internally) → tone mapping + sRGB output → grade → SMAA edge anti-aliasing.
  */
 export class PostFX {
   private readonly composer: EffectComposer;
@@ -48,6 +85,9 @@ export class PostFX {
     }
     this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), bloom.strength, bloom.radius, bloom.threshold));
     this.composer.addPass(new OutputPass());
+    if (new URLSearchParams(location.search).get('grade') !== '0') this.composer.addPass(new ShaderPass(GradeShader));
+    // Edge anti-aliasing on the finished image: building edges, cables and railings stop stair-stepping
+    if (new URLSearchParams(location.search).get('aa') !== '0') this.composer.addPass(new SMAAPass());
   }
 
   setSize(width: number, height: number): void {

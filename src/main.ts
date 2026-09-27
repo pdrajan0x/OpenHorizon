@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new THREE.WebGLRenderer({ canvas, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; // the atmosphere picks the tone mapping for its time of day
 
   const scene = new THREE.Scene();
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
@@ -89,7 +89,8 @@ async function main(): Promise<void> {
   const traffic = new Traffic(world, scene, map.roads, trafficCount ? await loadTrafficModels() : [], trafficCount);
   const cam = new ChaseCamera();
   // Dim fill light riding with the camera, so the player car's rear isn't a black silhouette
-  cam.camera.add(new THREE.PointLight(0xa8b8ff, 30, 16, 1.5));
+  // (not by day: in sunlight it only paints a spotlight on the road ahead)
+  if (atmosphere.time !== 'day') cam.camera.add(new THREE.PointLight(0xa8b8ff, 30, 16, 1.5));
   scene.add(cam.camera);
   atmosphere.castShadows(renderer, cam.camera);
   const fx = new PostFX(renderer, scene, cam.camera, atmosphere.look.bloom);

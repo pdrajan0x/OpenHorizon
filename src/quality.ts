@@ -10,4 +10,5 @@ export const EFFECTS = {
   shadows: QUALITY === 'high' && !off.has('shadows'),
   shade: !off.has('shade'),
   far: QUALITY === 'high' && !off.has('far'),
+  detail: !off.has('detail'),
 };

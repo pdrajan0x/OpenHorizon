@@ -65,6 +65,10 @@ export const COAST_MODELS = [
   // harbour: channel marker, light buoy, lifebuoy, wooden jetty kit
   'lateral_sea_marker', 'ocean_buoy', 'lifebuoy', 'modular_wooden_pier',
 ];
+// Detail maps (src/map.ts): fine surface grain blended into every city surface up close, so
+// low-resolution map textures read as real material. Same 2k set, into public/mods/coast/<id>/.
+export const DETAIL_TEXTURES = ['grey_plaster', 'beige_wall_001'];
+COAST_TEXTURES.push(...DETAIL_TEXTURES);
 const MAPS = ['Diffuse', 'nor_gl', 'Rough', 'AO'];
 async function download(url, dest) {
   if (existsSync(dest)) return;
