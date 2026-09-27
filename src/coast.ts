@@ -10,6 +10,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { toFloat } from './bridges';
 import type { Corridors } from './corridors';
 import { STATIC_GROUPS } from './map';
 import type { CoastLoop } from './outline';
@@ -120,7 +121,7 @@ export class Coast {
       if (!found) return null;
       const mesh = found as THREE.Mesh;
       mesh.updateWorldMatrix(true, false);
-      const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+      const geometry = toFloat(mesh.geometry.clone()).applyMatrix4(mesh.matrixWorld); // see toFloat
       geometry.computeBoundingBox();
       const size = geometry.boundingBox!.getSize(new THREE.Vector3());
       return { geometry, material: mesh.material as THREE.Material, size: Math.max(size.x, size.z) };

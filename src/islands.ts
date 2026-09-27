@@ -14,7 +14,7 @@
 //                    packed by shape next to the rest, GAP m of sea from any other land
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { BridgeNetwork, DECK_WIDTH, planLinks, type IslandPlan } from './bridges';
+import { BridgeNetwork, LANES, planLinks, type IslandPlan } from './bridges';
 import { Coast, area } from './coast';
 import { Corridors } from './corridors';
 import { GameMap, RoadGraph, type Manifest, type RoadData } from './map';
@@ -24,7 +24,6 @@ import { cleanMask, traceLoops, verticalOffset, type CoastLoop } from './outline
 const GAP = 300; // m of open sea between neighbouring islands' land
 const PACK_CELL = 100; // m per cell of the packing grid
 const STREAM_MARGIN = 900; // m beyond an island's shore at which it starts streaming in
-const BRIDGE_LANES = 2; // each way
 
 export interface IslandInfo {
   id: string;
@@ -385,12 +384,13 @@ export class Islands {
           const i = merged.nodes.length;
           merged.nodes.push([p.x, p.y, p.z]);
           merged.flags.push(0);
-          merged.links.push([prev, i, BRIDGE_LANES, BRIDGE_LANES]);
+          merged.links.push([prev, i, LANES, LANES]);
           prev = i;
         }
-        merged.links.push([prev, gb, BRIDGE_LANES, BRIDGE_LANES]);
+        merged.links.push([prev, gb, LANES, LANES]);
         // Whatever the cities and their shores have standing on the way to the deck is cut away
-        corridors.add([plans[b.plan.a].nodes[b.plan.na], ...b.nodes, plans[b.plan.b].nodes[b.plan.nb]], DECK_WIDTH / 2 + 1.5);
+        corridors.add([plans[b.plan.a].nodes[b.plan.na], ...b.nodes, plans[b.plan.b].nodes[b.plan.nb]],
+          [b.endHalf[0], ...b.halfWidths, b.endHalf[1]].map((h) => h + 1.5));
       }
       for (const m of maps) m.corridors = corridors;
       console.log(`bridges: ${bridges.bridges.length}`, bridges.bridges.map((b) =>

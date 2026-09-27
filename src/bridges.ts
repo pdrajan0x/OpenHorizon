@@ -14,7 +14,22 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { STATIC_GROUPS } from './map';
 
-export const DECK_WIDTH = 18; // m: two 3.4 m lanes each way plus shoulders
+// A highway: three 3.6 m lanes each way, a 2.5 m hard shoulder outside, 1 m inside, a 1.2 m median with a
+// concrete barrier, 29.8 m across. At each end it narrows over TAPER m to the street it joins.
+const LANE = 3.6;
+export const LANES = 3; // each way
+const SHOULDER = 2.5;
+const INNER_SHOULDER = 1.0;
+const MEDIAN = 1.2;
+export const DECK_WIDTH = 2 * (LANES * LANE + SHOULDER + INNER_SHOULDER) + MEDIAN;
+const TAPER = 120; // m over which a deck widens from the street it leaves to the full highway
+const END_DIP = 0.07; // m the deck sits under the city's road where they overlap, so they don't fight (flicker)
+const DIP_LENGTH = 30; // m over which that dip eases out
+const EMBANKMENT = 170; // m from each end with an embankment either side down to the seabed, no void under the road
+const EMBANK_FOOT = -6; // m: where the embankment meets the seabed
+const EMBANK_SLOPE = 1.5; // m out per m down
+const S_CURVE = 0.05; // of a link's length: how far its S-bend swings either way (at most S_CURVE_MAX m)
+const S_CURVE_MAX = 70;
 const DECK_CLEARANCE = 12; // m above the sea at least, away from the ends
 const MAX_GRADE = 0.06;
 const DECK_DEPTH = 1.6; // m of girder under the road surface
@@ -316,6 +331,9 @@ export interface Bridge {
   plan: LinkPlan;
   /** Road-graph nodes on the deck, from end A to end B (not including the gateways). */
   nodes: THREE.Vector3[];
+  /** Half width of the deck at each node, and at the two ends (A, B). */
+  halfWidths: number[];
+  endHalf: [number, number];
   length: number;
 }
 
@@ -324,23 +342,52 @@ interface Frame {
   t: THREE.Vector3; // unit tangent (with grade)
   r: THREE.Vector3; // unit right, horizontal
   s: number; // arc length
+  hw: number; // half width of the deck here
+  dip: number; // how far the drawn deck sits under its line here (ends only)
 }
 
-/** The deck centerline from A to B: Hermite curve in plan, eased height profile, sampled every STEP m. */
-function centerline(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2): Frame[] {
+/** The frame `s` m along a run of frames (from its first), between the two either side. */
+function frameAt(frames: Frame[], s: number): Frame {
+  const s0 = frames[0].s;
+  let lo = 0;
+  let hi = frames.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (frames[mid].s - s0 <= s) lo = mid; else hi = mid;
+  }
+  const a = frames[lo];
+  const b = frames[hi];
+  const k = THREE.MathUtils.clamp((s + s0 - a.s) / (b.s - a.s || 1), 0, 1);
+  return {
+    p: a.p.clone().lerp(b.p, k), t: a.t.clone().lerp(b.t, k).normalize(), r: a.r.clone().lerp(b.r, k).normalize(),
+    s: s + s0, hw: a.hw + (b.hw - a.hw) * k, dip: a.dip + (b.dip - a.dip) * k,
+  };
+}
+
+/**
+ * The deck centerline from A to B: a Hermite curve in plan with a gentle S-bend (a straight causeway is dull
+ * to drive), an eased height profile, sampled every STEP m; its width tapers from each end's street
+ * (halfA, halfB) to the full highway.
+ */
+function centerline(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db: THREE.Vector2, halfA: number, halfB: number): Frame[] {
   const L = Math.hypot(pb.x - pa.x, pb.z - pa.z);
   const m = L * 0.75;
   const plan: THREE.Vector2[] = [];
   const N = Math.max(40, Math.ceil(L / 1.5));
+  // The bend: across the chord, zero with zero slope at both ends so each end still leaves along its road
+  const swing = L > 500 ? Math.min(S_CURVE_MAX, S_CURVE * L) : 0;
+  const nx = -(pb.z - pa.z) / (L || 1);
+  const nz = (pb.x - pa.x) / (L || 1);
   for (let i = 0; i <= N; i++) {
     const t = i / N;
     const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
     const h10 = t ** 3 - 2 * t ** 2 + t;
     const h01 = -2 * t ** 3 + 3 * t ** 2;
     const h11 = t ** 3 - t ** 2;
+    const bend = swing * Math.sin(2 * Math.PI * t) * Math.sin(Math.PI * t) ** 2;
     plan.push(new THREE.Vector2(
-      h00 * pa.x + h10 * m * da.x + h01 * pb.x + h11 * m * db.x,
-      h00 * pa.z + h10 * m * da.y + h01 * pb.z + h11 * m * db.y,
+      h00 * pa.x + h10 * m * da.x + h01 * pb.x + h11 * m * db.x + nx * bend,
+      h00 * pa.z + h10 * m * da.y + h01 * pb.z + h11 * m * db.y + nz * bend,
     ));
   }
   // Resample at even arc length
@@ -377,9 +424,14 @@ function centerline(pa: THREE.Vector3, da: THREE.Vector2, pb: THREE.Vector3, db:
       return s / (2 * k + 1);
     });
   }
-  const frames: Frame[] = pts.map((p, i) => ({
-    p: new THREE.Vector3(p.x, ys[i], p.y), t: new THREE.Vector3(), r: new THREE.Vector3(), s: (S * i) / n,
-  }));
+  const ease = (x: number) => { const c = THREE.MathUtils.clamp(x, 0, 1); return c * c * (3 - 2 * c); };
+  const full = DECK_WIDTH / 2;
+  const frames: Frame[] = pts.map((p, i) => {
+    const s = (S * i) / n;
+    const hw = Math.min(halfA + (full - halfA) * ease(s / TAPER), halfB + (full - halfB) * ease((S - s) / TAPER));
+    const dip = END_DIP * (1 - ease(Math.min(s, S - s) / DIP_LENGTH));
+    return { p: new THREE.Vector3(p.x, ys[i], p.y), t: new THREE.Vector3(), r: new THREE.Vector3(), s, hw, dip };
+  });
   frames.forEach((f, i) => {
     const a = frames[Math.max(0, i - 1)].p;
     const b = frames[Math.min(frames.length - 1, i + 1)].p;
@@ -399,7 +451,7 @@ export class BridgeNetwork {
     islands: IslandPlan[],
     plans: LinkPlan[],
     private readonly kit: Partial<Record<keyof Kit, LoadedPart>>,
-    private readonly mats: { asphalt: THREE.Material; concrete: THREE.Material; paint: THREE.Material },
+    private readonly mats: { asphalt: THREE.Material; concrete: THREE.Material; rock: THREE.Material; paint: THREE.Material },
   ) {
     this.root.name = 'bridges';
     for (const plan of plans) {
@@ -421,16 +473,24 @@ export class BridgeNetwork {
       };
       const da = dirOut(A, plan.na, toward);
       const db = dirOut(B, plan.nb, toward.clone().negate()).negate(); // arriving at B
-      const frames = centerline(pa, da, pb, db);
+      // Each end as wide as the street it joins (its lanes both ways), up to the full highway
+      const streetHalf = (isl: IslandPlan, node: number) => {
+        const lanes = Math.max(2, ...isl.adjacent[node].map((a) => a.lanes));
+        return THREE.MathUtils.clamp((lanes * 3.5 + 3) / 2, 5.5, DECK_WIDTH / 2);
+      };
+      const endHalf: [number, number] = [streetHalf(A, plan.na), streetHalf(B, plan.nb)];
+      const frames = centerline(pa, da, pb, db, endHalf[0], endHalf[1]);
       const length = frames[frames.length - 1].s;
       const nodes: THREE.Vector3[] = [];
+      const halfWidths: number[] = [];
       const count = Math.max(1, Math.round(length / NODE_SPACING));
       for (let k = 1; k < count; k++) {
         const s = (length * k) / count;
         const i = Math.min(frames.length - 1, Math.round((s / length) * (frames.length - 1)));
         nodes.push(frames[i].p.clone());
+        halfWidths.push(frames[i].hw);
       }
-      this.bridges.push({ plan, nodes, length });
+      this.bridges.push({ plan, nodes, halfWidths, endHalf, length });
       this.build(world, frames);
     }
   }
@@ -451,7 +511,9 @@ export class BridgeNetwork {
         g.scene.traverse((o) => {
           const m = o as THREE.Mesh;
           if (!m.isMesh) return;
-          const geometry = m.geometry.clone().applyMatrix4(m.matrixWorld);
+          // Compressed models store positions as normalized integers: to floats first, or moving and
+          // scaling them clamps every coordinate to ±1 and mangles the shape
+          const geometry = toFloat(m.geometry.clone()).applyMatrix4(m.matrixWorld);
           // Lay the length along +X
           if ((part.axis ?? '') === 'z') geometry.rotateY(Math.PI / 2);
           geometry.computeBoundingBox();
@@ -484,12 +546,11 @@ export class BridgeNetwork {
       const [map, normalMap, roughnessMap] = await Promise.all([load(name, 'Diffuse', true), load(name, 'nor_gl', false), load(name, 'Rough', false)]);
       return new THREE.MeshStandardMaterial({ map, normalMap, roughnessMap, color: map ? 0xffffff : fallback, roughness: 1 });
     };
-    const [asphalt, concrete] = await Promise.all([pbr('asphalt_02', 0x3a3a3c), pbr('concrete_wall_008', 0x8e8c88)]);
-    return new BridgeNetwork(world, islands, plans, kit, { asphalt, concrete, paint: laneMarkings() });
+    const [asphalt, concrete, rock] = await Promise.all([pbr('asphalt_02', 0x3a3a3c), pbr('concrete_wall_008', 0x8e8c88), pbr('coast_land_rocks_01', 0x6b6358)]);
+    return new BridgeNetwork(world, islands, plans, kit, { asphalt, concrete, rock, paint: laneMarkings() });
   }
 
   private build(world: RAPIER.World, frames: Frame[]): void {
-    const half = DECK_WIDTH / 2;
     const at = (f: Frame, x: number, y: number) =>
       new THREE.Vector3().copy(f.p).addScaledVector(f.r, x).setY(f.p.y + y);
     // The barriers stop BARRIER_GAP m short of each end: a bridge often leaves from the side of a street,
@@ -498,15 +559,19 @@ export class BridgeNetwork {
     const inner = frames.length > 2 * g + 4
       ? frames.slice(g, frames.length - g).map((f) => ({ ...f, s: f.s - frames[g].s }))
       : [];
-    // --- Collision: the road surface, and a wall along each edge between the gaps ---
-    const strip = (fs: Frame[], section: [number, number][], dipEnds: boolean) => {
+    // The median runs where the deck is full width
+    const full = DECK_WIDTH / 2 - 0.2;
+    const median = inner.filter((f) => f.hw >= full);
+    // --- Collision: the road surface, a wall along each edge and down the middle, the embankments ---
+    const strip = (fs: Frame[], section: (f: Frame) => [number, number][], dipEnds: boolean) => {
+      if (fs.length < 2) return;
       const col: number[] = [];
       const colIdx: number[] = [];
-      const m = section.length;
+      const m = section(fs[0]).length;
       fs.forEach((f, i) => {
         // The first and last metres dip a hair under the city's road so there's no lip to hit
         const dip = dipEnds && (i === 0 || i === fs.length - 1) ? -0.12 : 0;
-        for (const [x, y] of section) {
+        for (const [x, y] of section(f)) {
           const v = at(f, x, y + dip);
           col.push(v.x, v.y, v.z);
         }
@@ -518,10 +583,25 @@ export class BridgeNetwork {
       world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(col), new Uint32Array(colIdx))
         .setFriction(1).setCollisionGroups(STATIC_GROUPS));
     };
-    strip(frames, [[-half, 0], [half, 0]], true);
+    strip(frames, (f) => [[-f.hw, 0], [f.hw, 0]], true);
     if (inner.length) {
-      strip(inner, [[-half, BARRIER_HEIGHT], [-half, 0]], false);
-      strip(inner, [[half, 0], [half, BARRIER_HEIGHT]], false);
+      strip(inner, (f) => [[-f.hw, BARRIER_HEIGHT], [-f.hw, 0]], false);
+      strip(inner, (f) => [[f.hw, 0], [f.hw, BARRIER_HEIGHT]], false);
+    }
+    if (median.length > 2) strip(median, () => [[-0.35, 0], [-0.35, 0.9], [0.35, 0.9], [0.35, 0]], false);
+    // Embankments: near each end, rock slopes from the deck's edges down to the seabed, so nothing
+    // under or beside the road is open (no void to see into or drop through)
+    const ends = [frames.filter((f) => f.s <= EMBANKMENT), frames.filter((f) => f.s >= frames[frames.length - 1].s - EMBANKMENT)];
+    const slope = (f: Frame, side: number): [number, number][] => {
+      const drop = f.p.y - EMBANK_FOOT;
+      return [[side * f.hw, -0.05], [side * (f.hw + EMBANK_SLOPE * drop), -drop]];
+    };
+    for (const e of ends) {
+      if (e.length < 2) continue;
+      for (const side of [-1, 1]) {
+        strip(e, (f) => slope(f, side), false);
+        this.ribbon(e, (f) => (side < 0 ? slope(f, side).reverse() : slope(f, side)), this.mats.rock, [0, 1], false, 12);
+      }
     }
 
     // --- Deck: kit pieces, else a ribbon ---
@@ -534,37 +614,49 @@ export class BridgeNetwork {
     else this.ribbonDeck(frames);
 
     // Lane markings are paint on whatever deck there is
-    this.ribbon(frames, [[-half + 0.3, 0.03], [half - 0.3, 0.03]], this.mats.paint, [0, 1], false);
+    this.ribbon(frames, (f) => [[-f.hw + 0.3, 0.03 - f.dip], [f.hw - 0.3, 0.03 - f.dip]], this.mats.paint, [0, 1], false);
 
-    // --- Barriers along both edges ---
+    // --- Barriers along both edges and down the median ---
     const barrier = this.kit.barrier;
     if (!inner.length) {
       // A short link: no barriers at all
     } else if (barrier) {
       const stretch = barrier.part.stretch ?? 1;
       for (const side of [-1, 1]) {
-        this.instanceAlong(inner, barrier, () => ({
-          x: side * (half - barrier.width / 2), y: -barrier.min.y, sx: stretch, sy: 1, sz: 1,
+        this.instanceAlong(inner, barrier, (f) => ({
+          x: side * (f.hw - barrier.width / 2), y: -barrier.min.y, sx: stretch, sy: 1, sz: 1,
         }), barrier.length * stretch, true);
+      }
+      if (median.length > 2) {
+        this.instanceAlong(median, barrier, () => ({ x: 0, y: -barrier.min.y, sx: stretch, sy: 1, sz: 1 }), barrier.length * stretch, true);
       }
     } else {
       for (const side of [-1, 1]) {
-        const x = side * half;
-        this.ribbon(inner, [[x, 0], [x, BARRIER_HEIGHT], [x + side * 0.4, BARRIER_HEIGHT], [x + side * 0.4, -DECK_DEPTH]], this.mats.concrete, [0, 0.3, 0.4, 1], false);
+        this.ribbon(inner, (f) => {
+          const x = side * f.hw;
+          const section: [number, number][] = [[x, 0], [x, BARRIER_HEIGHT], [x + side * 0.4, BARRIER_HEIGHT], [x + side * 0.4, -DECK_DEPTH]];
+          return side < 0 ? section.reverse() : section; // the road face towards the road on both sides
+        }, this.mats.concrete, side < 0 ? [1, 0.4, 0.3, 0] : [0, 0.3, 0.4, 1], false);
       }
+      if (median.length > 2) this.ribbon(median, () => [[-0.35, 0], [-0.3, 0.9], [0.3, 0.9], [0.35, 0]], this.mats.concrete, [0, 0.3, 0.7, 1], false);
     }
 
-    // --- Lamps ---
+    // --- Lamps: down the median on the highway, along the edges where it narrows ---
     const lamp = this.kit.lamp;
     if (lamp) {
       const spacing = lamp.part.spacing ?? 60;
       const list: THREE.Matrix4[] = [];
       for (let s = spacing / 2, k = 0; s < frames[frames.length - 1].s; s += spacing, k++) {
-        const f = frames[Math.min(frames.length - 1, Math.round(s / STEP))];
-        const side = k % 2 ? 1 : -1;
-        const p = at(f, side * (half - 0.2), -lamp.min.y);
-        const yaw = Math.atan2(-f.r.z * side, f.r.x * side);
-        list.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(1.6, 1.6, 1.6)));
+        const f = frameAt(frames, s);
+        const inMedian = f.hw >= full;
+        for (const side of inMedian ? [-1, 1] : [k % 2 ? 1 : -1]) {
+          // In the median: a lamp either side of the barrier, each arm over its own carriageway
+          const x = inMedian ? side * 0.7 : side * (f.hw - 0.2);
+          const facing = inMedian ? -side : side;
+          const p = at(f, x, -lamp.min.y);
+          const yaw = Math.atan2(-f.r.z * facing, f.r.x * facing);
+          list.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)), new THREE.Vector3(1.6, 1.6, 1.6)));
+        }
       }
       this.instances(lamp, list, true);
     }
@@ -573,11 +665,11 @@ export class BridgeNetwork {
     const pillar = this.kit.pillar;
     const list: { f: Frame; h: number }[] = [];
     for (let s = PILLAR_SPACING; s < frames[frames.length - 1].s - PILLAR_SPACING / 2; s += PILLAR_SPACING) {
-      const f = frames[Math.round(s / STEP)];
-      if (f.p.y < 6) continue;
+      const f = frameAt(frames, s);
+      if (f.p.y < 6 || f.s < EMBANKMENT || f.s > frames[frames.length - 1].s - EMBANKMENT) continue;
       list.push({ f, h: f.p.y - DECK_DEPTH - SEABED });
       const hy = (f.p.y - DECK_DEPTH - SEABED) / 2;
-      world.createCollider(RAPIER.ColliderDesc.cuboid(1.4, hy, half * 0.7)
+      world.createCollider(RAPIER.ColliderDesc.cuboid(1.4, hy, f.hw * 0.7)
         .setTranslation(f.p.x, SEABED + hy, f.p.z)
         .setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(-f.t.z, f.t.x), 0)))
         .setCollisionGroups(STATIC_GROUPS));
@@ -585,7 +677,7 @@ export class BridgeNetwork {
     if (pillar) {
       const mats = list.map(({ f, h }) => {
         const sy = h / pillar.height;
-        const sxz = Math.min(3, Math.max(0.5, (DECK_WIDTH * 0.8) / Math.max(pillar.width, pillar.length)));
+        const sxz = Math.min(3, Math.max(0.5, (f.hw * 2 * 0.8) / Math.max(pillar.width, pillar.length)));
         const p = new THREE.Vector3(f.p.x, SEABED - pillar.min.y * sy, f.p.z);
         return new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(-f.t.z, f.t.x) + Math.PI / 2, 0)), new THREE.Vector3(sxz, sy, sxz));
       });
@@ -595,33 +687,35 @@ export class BridgeNetwork {
     }
   }
 
-  /** A strip along the curve through cross-section points (x across, y up), u across, v along. */
-  private ribbon(frames: Frame[], section: [number, number][], material: THREE.Material, us: number[], collide: boolean): void {
+  /** A strip along the curve through cross-section points (x across, y up) per frame, u across, v along. */
+  private ribbon(frames: Frame[], section: (f: Frame) => [number, number][], material: THREE.Material, us: number[], collide: boolean, uScale = DECK_WIDTH / 8): void {
     void collide;
     const pos: number[] = [];
     const uv: number[] = [];
     const idx: number[] = [];
-    const m = section.length;
+    const m = section(frames[0]).length;
     const vScale = material === this.mats.paint ? 1 / 12 : 1 / 8;
     frames.forEach((f, i) => {
-      section.forEach(([x, y], j) => {
+      section(f).forEach(([x, y], j) => {
         const v = new THREE.Vector3().copy(f.p).addScaledVector(f.r, x).setY(f.p.y + y);
         pos.push(v.x, v.y, v.z);
-        uv.push(material === this.mats.paint ? us[j] : (us[j] * DECK_WIDTH) / 8, f.s * vScale);
+        uv.push(material === this.mats.paint ? us[j] : us[j] * uScale, f.s * vScale);
       });
       if (i === 0) return;
       const a = (i - 1) * m;
       const b = i * m;
-      for (let k = 0; k < m - 1; k++) idx.push(a + k, b + k, a + k + 1, a + k + 1, b + k, b + k + 1);
+      // Wound so a section running left to right faces up (three.js draws counter-clockwise as the front):
+      // each face's front is to the left of its section's direction, looking down the road
+      for (let k = 0; k < m - 1; k++) idx.push(a + k, a + k + 1, b + k, a + k + 1, b + k + 1, b + k);
     });
     this.addChunked(pos, uv, idx, material, frames, m);
   }
 
   private ribbonDeck(frames: Frame[]): void {
-    const half = DECK_WIDTH / 2;
-    this.ribbon(frames, [[-half, 0], [half, 0]], this.mats.asphalt, [0, 1], true);
+    // Under the city's road where they overlap (f.dip), so the two surfaces don't flicker
+    this.ribbon(frames, (f) => [[-f.hw, -f.dip], [f.hw, -f.dip]], this.mats.asphalt, [0, 1], true);
     // Girder: sides and underside
-    this.ribbon(frames, [[half, 0], [half, -DECK_DEPTH], [half - 3, -DECK_DEPTH], [-half + 3, -DECK_DEPTH], [-half, -DECK_DEPTH], [-half, 0]], this.mats.concrete, [0, 0.1, 0.25, 0.75, 0.9, 1], false);
+    this.ribbon(frames, (f) => [[f.hw, -f.dip], [f.hw, -DECK_DEPTH], [f.hw - 3, -DECK_DEPTH], [-f.hw + 3, -DECK_DEPTH], [-f.hw, -DECK_DEPTH], [-f.hw, -f.dip]], this.mats.concrete, [0, 0.1, 0.25, 0.75, 0.9, 1], false);
   }
 
   /** Split a ribbon into chunks along its length (frustum culling), as meshes. */
@@ -654,16 +748,15 @@ export class BridgeNetwork {
     frames: Frame[], part: LoadedPart, place: (f: Frame) => { x: number; y: number; sx: number; sy: number; sz: number },
     pieceLength: number, detail: boolean,
   ): void {
-    const S = frames[frames.length - 1].s;
+    const S = frames[frames.length - 1].s - frames[0].s;
     const count = Math.max(1, Math.round(S / pieceLength));
     const len = S / count;
     const list: THREE.Matrix4[] = [];
     const q = new THREE.Quaternion();
     const basis = new THREE.Matrix4();
     for (let k = 0; k < count; k++) {
-      const s = (k + 0.5) * len;
-      const i = Math.min(frames.length - 1, Math.round(s / STEP));
-      const f = frames[i];
+      // Each piece exactly where it belongs along the curve (not snapped to a cross-section: that left gaps)
+      const f = frameAt(frames, (k + 0.5) * len);
       const o = place(f);
       // Piece axes: length along the tangent, up, across to the right
       const up = new THREE.Vector3().crossVectors(f.r, f.t).normalize();
@@ -673,6 +766,7 @@ export class BridgeNetwork {
       // Each copy covers `len` m (a hair more, closing the gaps on curves), centred on its point
       const sx = (len * 1.02) / part.length;
       p.addScaledVector(f.t, -((part.min.x + part.max.x) / 2) * sx);
+      p.addScaledVector(f.r, -((part.min.z + part.max.z) / 2) * o.sz);
       list.push(new THREE.Matrix4().compose(p, q, new THREE.Vector3(sx, o.sy, o.sz)));
     }
     this.instances(part, list, detail);
@@ -719,6 +813,24 @@ export class BridgeNetwork {
   }
 }
 
+/** A geometry's attributes as plain floats (quantized glTF stores normalized integers). */
+export function toFloat(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  for (const name of Object.keys(g.attributes)) {
+    const a = g.getAttribute(name) as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+    if (!(a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute && a.array instanceof Float32Array && !a.normalized) continue;
+    const n = a.itemSize;
+    const f = new Float32Array(a.count * n);
+    for (let i = 0; i < a.count; i++) {
+      f[i * n] = a.getX(i);
+      if (n > 1) f[i * n + 1] = a.getY(i);
+      if (n > 2) f[i * n + 2] = a.getZ(i);
+      if (n > 3) f[i * n + 3] = a.getW(i);
+    }
+    g.setAttribute(name, new THREE.BufferAttribute(f, n));
+  }
+  return g;
+}
+
 /** Lane markings as a texture across the deck: solid edge lines, dashed lane lines, a double centre line. */
 function laneMarkings(): THREE.Material {
   const W = 256;
@@ -736,12 +848,13 @@ function laneMarkings(): THREE.Material {
     if (dashed) g.fillRect(px(m) - w / 2, 0, w, H * 0.4);
     else g.fillRect(px(m) - w / 2, 0, w, H);
   };
-  line(-usable / 2 + 0.5, 0.15, false, '#e8e6df');
-  line(usable / 2 - 0.5, 0.15, false, '#e8e6df');
-  line(-3.4, 0.12, true, '#e8e6df');
-  line(3.4, 0.12, true, '#e8e6df');
-  line(-0.15, 0.12, false, '#e0b43a');
-  line(0.15, 0.12, false, '#e0b43a');
+  // Each carriageway: a yellow line by the median, dashed white between its lanes, a solid white edge
+  const inside = MEDIAN / 2 + INNER_SHOULDER;
+  for (const side of [-1, 1]) {
+    line(side * inside, 0.15, false, '#e0b43a');
+    for (let k = 1; k < LANES; k++) line(side * (inside + k * LANE), 0.12, true, '#e8e6df');
+    line(side * (inside + LANES * LANE), 0.15, false, '#e8e6df');
+  }
   const t = new THREE.CanvasTexture(c);
   t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;

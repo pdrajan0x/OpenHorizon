@@ -50,7 +50,7 @@ declare global {
   interface Window {
     __game?: Record<string, number | boolean | string>;
     __debug?: Record<string, unknown>; // live game objects for test scripts, with ?debug
-    __audit?: { audit: Audit; run: () => number; goTo: (x: number, z: number) => Promise<void> }; // ?debug&audit
+    __audit?: { audit: Audit; run: () => number; goTo: (x: number, z: number, heading?: number) => Promise<void> }; // ?debug&audit
   }
 }
 
@@ -181,14 +181,14 @@ async function main(): Promise<void> {
   // Spawning from the map (Shift+click, or T at the GPS pin): the road nearest the point, with that city
   // streamed in first so the car lands on solid ground. Not during an event or a crash
   let teleporting = false;
-  const teleport = async (at: THREE.Vector2) => {
+  const teleport = async (at: THREE.Vector2, heading = player.heading) => {
     if (teleporting) return;
     if (events.running || crash) {
       hud.note(events.running ? 'LEAVE THE EVENT TO SPAWN ELSEWHERE' : 'WAIT FOR THE CRASH TO END', 'info');
       return;
     }
     teleporting = true;
-    const pose = map.roads.roadPose(at.x, at.y, player.heading);
+    const pose = map.roads.roadPose(at.x, at.y, heading);
     await map.prime(pose.position);
     teleporting = false;
     if (worldMap.open) worldMap.toggle();
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
     window.__audit = {
       audit,
       run: () => audit.run(new THREE.Vector3().copy(player.body.translation() as THREE.Vector3Like)),
-      goTo: async (x: number, z: number) => { await teleport(new THREE.Vector2(x, z)); },
+      goTo: async (x: number, z: number, heading?: number) => { await teleport(new THREE.Vector2(x, z), heading); },
     };
   }
 

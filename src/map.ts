@@ -659,7 +659,8 @@ export class GameMap {
     if (!t) {
       t = download(`${this.base}/tex/${name}.gtx`)
         .then((buf) => {
-          const t = buf ? decodeGtx(buf, color) : null;
+          // Not a texture (a dev server answers a missing file with its index page): leave it out
+          const t = buf && buf.byteLength >= 16 && new TextDecoder().decode(new Uint8Array(buf, 0, 4)) === 'GTX1' ? decodeGtx(buf, color) : null;
           if (t) t.name = name;
           return t;
         })
@@ -671,7 +672,7 @@ export class GameMap {
 }
 
 /** GTX: "GTX1", u32 format (1/3/5 = DXT1/3/5, 0 = RGBA8), u16 w, u16 h, u16 mips, u16 pad, mip chain. */
-function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture {
+function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture | null {
   const view = new DataView(buf);
   const format = view.getUint32(4, true);
   const width = view.getUint16(8, true);
@@ -679,6 +680,7 @@ function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture {
   const mips = view.getUint16(12, true);
   let texture: THREE.Texture;
   if (format === 0) {
+    if (buf.byteLength < 16 + width * height * 4) return null;
     texture = new THREE.DataTexture(new Uint8Array(buf, 16, width * height * 4), width, height, THREE.RGBAFormat);
     texture.generateMipmaps = true;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -694,6 +696,7 @@ function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture {
       mipmaps.push({ data: new Uint8Array(buf, offset, size), width: w, height: h });
       offset += size;
     }
+    if (!mipmaps.length) return null; // cut short: nothing to upload
     const fmt = format === 1 ? THREE.RGBA_S3TC_DXT1_Format : format === 3 ? THREE.RGBA_S3TC_DXT3_Format : THREE.RGBA_S3TC_DXT5_Format;
     texture = new THREE.CompressedTexture(mipmaps as unknown as ImageData[], width, height, fmt);
     texture.minFilter = mipmaps.length > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;

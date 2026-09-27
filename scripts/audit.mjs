@@ -7,8 +7,10 @@
 //   PLACES="x,z;x,z" node scripts/audit.mjs just these points
 //   CITIES="chicago miami" node scripts/audit.mjs
 //   BRIDGES=1 node scripts/audit.mjs        only the bridge ends
+//   REDO=1 node scripts/audit.mjs           no new scan: the last run's findings again, new screenshots and report
 // Output: test-results/audit/issues.json, report.md, shot-<n>.png
 import fs from 'node:fs';
+import { report, worst as pickWorst } from './audit-report.mjs';
 import { launch } from './browser.mjs';
 import { createServer } from 'vite';
 
@@ -28,7 +30,7 @@ try {
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1 && window.__audit, null, { timeout: 300_000 });
 
   // The plan: explicit places, or every bridge end plus a grid over each city's roads
-  const places = await page.evaluate(({ GRID, only, cities, bridgesOnly }) => {
+  const places = process.env.REDO ? [] : await page.evaluate(({ GRID, only, cities, bridgesOnly }) => {
     const d = window.__debug;
     if (only) return only.split(';').map((p) => { const [x, z] = p.split(',').map(Number); return { x, z, why: 'asked' }; });
     const map = d.map;
@@ -65,12 +67,20 @@ try {
     console.log(`[${k + 1}/${places.length}] ${p.why} (${p.x.toFixed(0)}, ${p.z.toFixed(0)}): +${found} (total ${total}) ${((Date.now() - t0) / 60000).toFixed(1)} min`);
   }
 
+  if (process.env.REDO) {
+    const last = JSON.parse(fs.readFileSync(`${OUT}/issues.json`));
+    await page.evaluate((last) => {
+      const a = window.__audit.audit;
+      a.issues.push(...last.issues.map((i) => ({ ...i, shot: undefined })));
+      a.stats = last.stats;
+      a.draw();
+    }, last);
+  }
   const { issues, stats } = await page.evaluate(() => ({ issues: window.__audit.audit.issues, stats: window.__audit.audit.stats }));
   fs.writeFileSync(`${OUT}/issues.json`, JSON.stringify({ stats, issues }, null, 1));
 
   // Screenshots of the worst: the car at the issue, the drone camera over it, markers on
-  const order = { high: 0, medium: 1, low: 2 };
-  const worst = [...issues].sort((a, b) => order[a.severity] - order[b.severity] || b.hits - a.hits).slice(0, SHOTS);
+  const worst = pickWorst(issues, SHOTS);
   await page.evaluate(() => { window.__audit.audit.show(true); window.__debug.cam.mode = 'drone'; });
   for (const [n, i] of worst.entries()) {
     await page.evaluate(({ x, z }) => window.__audit.goTo(x, z), { x: i.position[0], z: i.position[2] });
@@ -80,18 +90,9 @@ try {
     i.shot = `shot-${n + 1}.png`;
   }
 
-  // The report
-  const kinds = { A: 'visual rendering problem', B: 'geometry hole / gap', C: 'collision problem', D: 'backface / normal / material problem', E: 'missing piece of environment' };
-  const by = (f) => Object.entries(issues.reduce((m, i) => ((m[f(i)] = (m[f(i)] ?? 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
-  let md = `# Geometry and visibility audit\n\n${stats.places} places, ${stats.points} sample points, ${stats.rays} rays; ${stats.meshesChecked} meshes (${(stats.trianglesChecked / 1e6).toFixed(1)} M triangles) checked. ${issues.length} issues.\n\n`;
-  md += '| Kind | Issues |\n|---|---|\n' + Object.entries(kinds).map(([k, v]) => `| ${k}: ${v} | ${issues.filter((i) => i.kind === k).length} |`).join('\n') + '\n\n';
-  md += '| Type | Issues |\n|---|---|\n' + by((i) => `${i.kind} ${i.type}`).map(([t, n]) => `| ${t} | ${n} |`).join('\n') + '\n\n';
-  md += '| Where | Issues |\n|---|---|\n' + by((i) => i.group.split(' › ').find((s) => s.startsWith('map:')) ?? i.group.split(' › ')[1] ?? i.group).map(([t, n]) => `| ${t} | ${n} |`).join('\n') + '\n\n';
-  md += '## Worst issues\n\n';
-  for (const i of worst) {
-    md += `### #${i.id} ${i.kind} ${i.severity}: ${i.type}\n\n- Mesh: ${i.mesh}\n- Group: ${i.group}\n- Position: (${i.position.join(', ')}), about ${i.size.toFixed(1)} m across, ${i.hits} rays\n- Why: ${i.why}\n${i.shot ? `\n![](${i.shot})\n` : ''}\n`;
-  }
-  fs.writeFileSync(`${OUT}/report.md`, md);
+  // The report, and the findings again with their screenshots
+  fs.writeFileSync(`${OUT}/issues.json`, JSON.stringify({ stats, issues }, null, 1));
+  fs.writeFileSync(`${OUT}/report.md`, report({ stats, issues }, worst));
   console.log(`audit done in ${((Date.now() - t0) / 60000).toFixed(1)} min: ${issues.length} issues → ${OUT}/report.md`);
 } finally {
   await browser.close();

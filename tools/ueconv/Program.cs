@@ -2,17 +2,43 @@
 //
 //   ueconv ls <Content/Paks dir> [filter]           list the package paths inside the paks
 //   ueconv level <root> <level path>                  the actors of one level and what they place
-//   ueconv map <root> <level path> <out dir> [--xodr <file.xodr>]   the level and everything it streams in,
-//                                                     as the game's map data (UeMap.cs)
+//   ueconv map <root> <level path> <out dir> [--xodr <file.xodr>] [--tiles <regex>]   the level and everything
+//                                                     it streams in, as the game's map data (UeMap.cs);
+//                                                     --tiles: only a large map's tiles matching (a test)
+//   ueconv mesh <root> <mesh path>                    a static mesh's materials, and each LOD's UV ranges
+//   ueconv tex <root> <texture path>                  a texture's format and mips
+//   ueconv json <root> <package path>                 a package's exports, as CUE4Parse reads them
 // <root> holds <Project>/Content (cooked, loose files) and Engine/Content.
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
+using CUE4Parse.FileProvider.Objects;
+using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Component;
 using CUE4Parse.UE4.Assets.Exports.Component.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Versions;
+using CUE4Parse.UE4.Objects.Core.Math;
+
+/**
+ * Materials and textures loaded once. CUE4Parse loads a package afresh on every request, and CARLA gives
+ * nearly every placed building its own material instance: each loaded its own copy of its parents (4 MB
+ * for a master material with its shader map), so one Town 13 tile held 8 GB of copies. Meshes and levels
+ * are big and loaded once anyway: not kept.
+ */
+class CachedProvider(DirectoryInfo dir, DirectoryInfo[] extra, SearchOption search, VersionContainer versions, StringComparer comparer)
+    : DefaultFileProvider(dir, extra, search, versions, comparer)
+{
+    readonly Dictionary<string, IPackage> cache = new(StringComparer.OrdinalIgnoreCase);
+    public override IPackage LoadPackage(GameFile file)
+    {
+        if (cache.TryGetValue(file.Path, out var package)) return package;
+        package = base.LoadPackage(file);
+        if (package is Package p && p.ExportMap.All(e => e.ClassName.StartsWith("Material") || e.ClassName.StartsWith("Texture"))) cache[file.Path] = package;
+        return package;
+    }
+}
 
 static class Program
 {
@@ -23,7 +49,7 @@ static class Program
         var root = new DirectoryInfo(paks);
         var project = root.GetDirectories().First(d => d.Name != "Engine" && Directory.Exists(Path.Combine(d.FullName, "Content")));
         var extra = new[] { new DirectoryInfo(Path.Combine(root.FullName, "Engine")) }.Where(d => d.Exists).ToArray();
-        var provider = new DefaultFileProvider(project, extra, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_26), StringComparer.OrdinalIgnoreCase);
+        var provider = new CachedProvider(project, extra, SearchOption.AllDirectories, new VersionContainer(EGame.GAME_UE4_26), StringComparer.OrdinalIgnoreCase);
         provider.Initialize();
         provider.SubmitKey(new FGuid(), new FAesKey(new byte[32]));
         provider.Mount();
@@ -94,6 +120,69 @@ static class Program
                 for (var cur = mi as CUE4Parse.UE4.Assets.Exports.Material.UMaterialInstance; cur != null; cur = cur.Parent as CUE4Parse.UE4.Assets.Exports.Material.UMaterialInstance)
                     Console.WriteLine($"   parent chain: {cur.Parent?.GetPathName()}");
             }
+            // Each LOD's sections: their UV ranges and texel density (UV units per metre, from the
+            // triangles' 3D and UV areas): what a texture is stretched over
+            var lods = sm.RenderData?.LODs ?? [];
+            for (int l = 0; l < lods.Length; l++)
+            {
+                var lod = lods[l];
+                if (lod.PositionVertexBuffer == null) continue;
+                var pos = lod.PositionVertexBuffer.Verts;
+                var uvs = lod.VertexBuffer!.UV;
+                var idx = lod.IndexBuffer!.Buffer!;
+                Console.WriteLine($"LOD {l}{(lod.SkipLod ? " (skipped)" : "")}: {lod.Sections.Sum(s => s.NumTriangles)} tris, {pos.Length} verts, {lod.VertexBuffer.NumTexCoords} UV channels");
+                foreach (var s in lod.Sections)
+                    for (int c = 0; c < Math.Min(2, lod.VertexBuffer.NumTexCoords); c++)
+                    {
+                        var us = new List<float>(); var vs = new List<float>();
+                        double area = 0, uvArea = 0;
+                        int wild = 0; // triangles with a UV out past ±1000 (half-float overflow)
+                        for (int t = 0; t < s.NumTriangles; t++)
+                        {
+                            var (a, b, d) = (idx[s.FirstIndex + t * 3], idx[s.FirstIndex + t * 3 + 1], idx[s.FirstIndex + t * 3 + 2]);
+                            var (ta, tb, td) = (uvs[a].UV[c], uvs[b].UV[c], uvs[d].UV[c]);
+                            if (new[] { ta, tb, td }.Any(uv => Math.Abs(uv.U) > 1000 || Math.Abs(uv.V) > 1000)) { wild++; continue; }
+                            foreach (var uv in new[] { ta, tb, td }) { us.Add(uv.U); vs.Add(uv.V); }
+                            var (pa, pb, pd) = (pos[a], pos[b], pos[d]);
+                            var cr = (pb - pa) ^ (pd - pa);
+                            area += Math.Sqrt(cr.X * (double)cr.X + cr.Y * (double)cr.Y + cr.Z * (double)cr.Z) / 2 / 1e4;
+                            uvArea += Math.Abs((tb.U - ta.U) * (td.V - ta.V) - (td.U - ta.U) * (tb.V - ta.V)) / 2;
+                        }
+                        us.Sort(); vs.Sort();
+                        // Triangles wound against their vertex normals (front: (v2 - v0) × (v1 - v0) in Unreal's frame)
+                        int against = 0, faced = 0, walls = 0, sideways = 0;
+                        if (c == 0)
+                            for (int t = 0; t < s.NumTriangles; t++)
+                            {
+                                var (a, b, d) = (idx[s.FirstIndex + t * 3], idx[s.FirstIndex + t * 3 + 1], idx[s.FirstIndex + t * 3 + 2]);
+                                var f = (pos[d] - pos[a]) ^ (pos[b] - pos[a]);
+                                var n = (FVector)uvs[a].Normal[2] + (FVector)uvs[b].Normal[2] + (FVector)uvs[d].Normal[2];
+                                double fl = Math.Sqrt(f.X * (double)f.X + f.Y * (double)f.Y + f.Z * (double)f.Z), nl = Math.Sqrt(n.X * (double)n.X + n.Y * (double)n.Y + n.Z * (double)n.Z);
+                                if (fl < 1 || nl < 1e-3) continue;
+                                faced++;
+                                if ((f.X * (double)n.X + f.Y * (double)n.Y + f.Z * (double)n.Z) / (fl * nl) < -0.9) against++;
+                                // Walls whose normals turn 45–135° from the face about the vertical (smoothing across corners)
+                                if (Math.Abs(f.Z) / fl >= 0.25) continue;
+                                walls++;
+                                double hn = Math.Sqrt(n.X * (double)n.X + n.Y * (double)n.Y), hf = Math.Sqrt(f.X * (double)f.X + f.Y * (double)f.Y);
+                                if (hn > 1e-3 && Math.Abs((f.X * (double)n.X + f.Y * (double)n.Y) / (hn * hf)) < Math.Sqrt(0.5)) sideways++;
+                            }
+                        if (faced > 0) Console.WriteLine($"   section mat {s.MaterialIndex}: {against} of {faced} triangles wound against their normals; {sideways} of {walls} walls with normals turned 45–135°");
+                        string Pc(List<float> l) => l.Count == 0 ? "-" : $"{l[0]:F2} [{l[l.Count / 100]:F2} {l[l.Count / 2]:F2} {l[l.Count * 99 / 100]:F2}] {l[^1]:F2}";
+                        Console.WriteLine($"   section mat {s.MaterialIndex}: {s.NumTriangles} tris ({wild} wild), UV{c} u {Pc(us)} v {Pc(vs)}, {area:F0} m², {Math.Sqrt(uvArea / Math.Max(1e-9, area)):F3} UV/m");
+                    }
+            }
+            var box = sm.RenderData?.Bounds;
+            Console.WriteLine($"bounds: extent {box?.BoxExtent} (cm), radius {box?.SphereRadius / 100:F1} m");
+            return 0;
+        }
+        if (args.Length >= 3 && args[0] == "json")
+        {
+            // A package's exports as CUE4Parse reads them: a material's parameters and streaming data, a
+            // component's properties
+            var p = Open(args[1]);
+            var path = args[2].EndsWith(".umap") || args[2].EndsWith(".uasset") ? args[2] : args[2] + ".uasset";
+            Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(p.LoadPackage(path).GetExports(), Newtonsoft.Json.Formatting.Indented));
             return 0;
         }
         if (args.Length >= 3 && args[0] == "tex")
@@ -112,7 +201,8 @@ static class Program
         if (args.Length >= 4 && args[0] == "map")
         {
             var i = Array.IndexOf(args, "--xodr");
-            UeMap.Write(Open(args[1]), args[2], i > 0 ? args[i + 1] : null, args[3]);
+            var t = Array.IndexOf(args, "--tiles");
+            UeMap.Write(Open(args[1]), args[2], i > 0 ? args[i + 1] : null, args[3], t > 0 ? args[t + 1] : null);
             return 0;
         }
         Console.Error.WriteLine("usage: ueconv ls <paks> [filter] | level <paks> <level>");

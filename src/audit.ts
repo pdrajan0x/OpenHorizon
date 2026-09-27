@@ -56,7 +56,8 @@ const AZIMUTHS = 16;
 const REACH = 70; // m a ray is followed
 const PITCH_DOWN = 0.35; // rad: the angled-down rays
 const TOLERANCE = 1.2; // m: render and collision surfaces this close are the same surface
-const CLUSTER = 6; // m
+const CLUSTER = 6; // m: ray findings closer than this are one issue
+const MESH_CLUSTER = 25; // m: the same for triangles found by the mesh checks
 const MARK_COLOURS: Record<IssueKind, number> = { A: 0x4da3ff, B: 0xff8c1a, C: 0xff2a2a, D: 0xd43cff, E: 0xffe600 };
 
 interface RenderHit {
@@ -153,8 +154,8 @@ export class Audit {
     const list: THREE.Mesh[] = [];
     this.root.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (!m.isMesh || (m as unknown as THREE.InstancedMesh).isInstancedMesh) return;
-      if (!m.geometry.index || !m.geometry.attributes.position) return;
+      // Instanced kit pieces (bridge barriers, lamps, coast rocks) are traced per copy
+      if (!m.isMesh || !m.geometry.index || !m.geometry.attributes.position) return;
       list.push(m);
     });
     return list;
@@ -165,6 +166,8 @@ export class Audit {
       const g = m.geometry as THREE.BufferGeometry & { boundsTree?: MeshBVH };
       if (!g.boundsTree) g.boundsTree = new MeshBVH(g);
       if (!g.boundingSphere) g.computeBoundingSphere();
+      const im = m as THREE.InstancedMesh;
+      if (im.isInstancedMesh && !im.boundingSphere) im.computeBoundingSphere();
     }
   }
 
@@ -172,30 +175,46 @@ export class Audit {
   private castRender(meshes: THREE.Mesh[], from: THREE.Vector3, dir: THREE.Vector3, far: number): RenderHit | null {
     let best: RenderHit | null = null;
     const world = new THREE.Ray(from, dir);
-    for (const m of meshes) {
-      tmpSphere.copy(m.geometry.boundingSphere!).applyMatrix4(m.matrixWorld);
-      if (world.distanceSqToPoint(tmpSphere.center) > tmpSphere.radius * tmpSphere.radius) continue;
-      if (from.distanceTo(tmpSphere.center) - tmpSphere.radius > (best?.distance ?? far)) continue;
-      tmpInv.copy(m.matrixWorld).invert();
-      tmpRay.copy(world).applyMatrix4(tmpInv);
+    const inst = new THREE.Matrix4();
+    const one = (m: THREE.Mesh, matrix: THREE.Matrix4, mirroredCopy: boolean) => {
       const g = m.geometry as THREE.BufferGeometry & { boundsTree?: MeshBVH };
+      tmpSphere.copy(g.boundingSphere!).applyMatrix4(matrix);
+      if (world.distanceSqToPoint(tmpSphere.center) > tmpSphere.radius * tmpSphere.radius) return;
+      if (from.distanceTo(tmpSphere.center) - tmpSphere.radius > (best?.distance ?? far)) return;
+      tmpInv.copy(matrix).invert();
+      tmpRay.copy(world).applyMatrix4(tmpInv);
       const hit = g.boundsTree!.raycastFirst(tmpRay, THREE.DoubleSide);
-      if (!hit || !hit.face) continue;
-      const point = hit.point.clone().applyMatrix4(m.matrixWorld);
+      if (!hit || !hit.face) return;
+      const point = hit.point.clone().applyMatrix4(matrix);
       const distance = point.distanceTo(from);
-      if (distance > far || (best && distance >= best.distance)) continue;
+      if (distance > far || (best && distance >= best.distance)) return;
       // The triangle's own facing, from its winding (not the stored normals)
       const pos = g.attributes.position;
       const a = new THREE.Vector3().fromBufferAttribute(pos, hit.face.a);
       const b = new THREE.Vector3().fromBufferAttribute(pos, hit.face.b);
       const c = new THREE.Vector3().fromBufferAttribute(pos, hit.face.c);
       const normal = new THREE.Vector3().subVectors(c, b).cross(new THREE.Vector3().subVectors(a, b)).normalize();
-      tmpNormalMatrix.getNormalMatrix(m.matrixWorld);
+      tmpNormalMatrix.getNormalMatrix(matrix);
       normal.applyMatrix3(tmpNormalMatrix).normalize();
+      // The renderer allows for a mirrored object but not for a mirrored copy within an instanced batch:
+      // that copy is drawn inside out
+      if (mirroredCopy) normal.negate();
       const material = materialOf(m, hit.face.materialIndex);
       let drawn = m.visible;
       for (let p = m.parent; p && drawn; p = p.parent) drawn = p.visible;
       best = { distance, point, normal, object: m, material, frontFacing: normal.dot(dir) < 0, drawn: drawn && material.visible };
+    };
+    for (const m of meshes) {
+      const im = m as THREE.InstancedMesh;
+      if (!im.isInstancedMesh) { one(m, m.matrixWorld, false); continue; }
+      // All the copies' sphere first, then each copy
+      tmpSphere.copy(im.boundingSphere!).applyMatrix4(m.matrixWorld);
+      if (world.distanceSqToPoint(tmpSphere.center) > tmpSphere.radius * tmpSphere.radius) continue;
+      for (let k = 0; k < im.count; k++) {
+        im.getMatrixAt(k, inst);
+        const mirrored = inst.determinant() < 0;
+        one(m, inst.premultiply(m.matrixWorld), mirrored);
+      }
     }
     return best;
   }
@@ -210,15 +229,16 @@ export class Audit {
 
   // ---------------------------------------------------------------- findings
 
-  private report(kind: IssueKind, type: string, at: THREE.Vector3, o: THREE.Object3D | null, why: string, severity: Issue['severity'], ray?: [THREE.Vector3, THREE.Vector3]): void {
-    const key = `${kind}|${type}|${Math.round(at.x / CLUSTER)},${Math.round(at.y / CLUSTER)},${Math.round(at.z / CLUSTER)}`;
+  private report(kind: IssueKind, type: string, at: THREE.Vector3, o: THREE.Object3D | null, why: string, severity: Issue['severity'], ray?: [THREE.Vector3, THREE.Vector3], cluster = CLUSTER): Issue {
+    // Ray findings merge by place; the mesh checks' by place within one mesh
+    const key = `${kind}|${type}|${cluster === CLUSTER ? '' : o?.uuid}|${Math.round(at.x / cluster)},${Math.round(at.y / cluster)},${Math.round(at.z / cluster)}`;
     const found = this.clusters.get(key);
     if (found) {
       found.hits++;
       const d = Math.hypot(found.position[0] - at.x, found.position[1] - at.y, found.position[2] - at.z);
-      found.size = Math.max(found.size, Math.min(CLUSTER * 2, 2 * d));
+      found.size = Math.max(found.size, Math.min(cluster * 2, 2 * d));
       if (severity === 'high') found.severity = 'high';
-      return;
+      return found;
     }
     const names = o ? describe(o) : { mesh: '(nothing)', group: '(none)' };
     const issue: Issue = {
@@ -228,6 +248,7 @@ export class Audit {
     };
     this.clusters.set(key, issue);
     this.issues.push(issue);
+    return issue;
   }
 
   /** One ray, traced through both worlds and compared. */
@@ -292,7 +313,7 @@ export class Audit {
     const fn = new THREE.Vector3(); const vn = new THREE.Vector3(); const na = new THREE.Vector3();
     for (const m of meshes) {
       const g = m.geometry;
-      if (this.checkedMeshes.has(g)) continue;
+      if ((m as THREE.InstancedMesh).isInstancedMesh || this.checkedMeshes.has(g)) continue;
       this.checkedMeshes.add(g);
       const pos = g.attributes.position;
       const nrm = g.attributes.normal;
@@ -321,16 +342,18 @@ export class Audit {
       // Leaves, cut-outs and glass bend their normals on purpose: only opaque surfaces count
       const surface = m.userData.surface as { mask?: boolean; blend?: boolean } | undefined;
       if (surface?.mask || surface?.blend || seeThrough(m.material as THREE.Material)) flippedAt.length = 0;
-      for (const p of flippedAt.slice(0, 400)) {
+      const total = Math.floor(idx.count / 3);
+      for (const p of flippedAt) {
         p.applyMatrix4(m.matrixWorld);
-        this.report('D', 'triangle wound against its normals', p, m,
-          `A triangle whose winding says it faces the opposite way to its stored normals: with ${side === THREE.FrontSide ? 'one-sided' : 'two-sided'} drawing it ${side === THREE.FrontSide ? 'disappears when seen from the front (a see-through hole in the wall) and is lit wrong' : 'is lit from the wrong side'}.`,
-          side === THREE.FrontSide ? 'high' : 'low');
+        this.report('D', 'triangles wound against their normals', p, m,
+          `${flippedAt.length} of this batch's ${total} triangles have a winding that faces the opposite way to their stored normals: with ${side === THREE.FrontSide ? 'one-sided' : 'two-sided'} drawing they ${side === THREE.FrontSide ? 'disappear when seen from the front (see-through holes in the wall) and are lit wrong' : 'are lit from the wrong side'}.`,
+          side === THREE.FrontSide ? 'high' : 'low', undefined, MESH_CLUSTER);
       }
-      for (const p of dupAt) {
-        p.applyMatrix4(m.matrixWorld);
-        this.report('A', 'duplicate triangles (z-fighting)', p, m,
-          `${dups} triangles in this batch are exact copies of others: the two copies fight for the same pixels and flicker.`, 'low');
+      if (dups) {
+        // One finding per batch: its copies are usually whole duplicated pieces, not scattered triangles
+        const issue = this.report('A', 'duplicate triangles (z-fighting)', dupAt[0].applyMatrix4(m.matrixWorld), m,
+          `${dups} of this batch's ${total} triangles are exact copies of others: the two copies fight for the same pixels and flicker.`, 'low', undefined, 1e9);
+        issue.hits = dups;
       }
       if (degenerate > 50) {
         const s = g.boundingSphere ?? (g.computeBoundingSphere(), g.boundingSphere!);
@@ -350,6 +373,7 @@ export class Audit {
     const a = new THREE.Vector3(); const b = new THREE.Vector3(); const c = new THREE.Vector3();
     const fn = new THREE.Vector3(); const vn = new THREE.Vector3(); const na = new THREE.Vector3();
     for (const m of this.targets()) {
+      if ((m as THREE.InstancedMesh).isInstancedMesh) continue; // shared kit models: left alone
       const g = m.geometry;
       const pos = g.attributes.position;
       const nrm = g.attributes.normal;
@@ -375,7 +399,7 @@ export class Audit {
       g.setIndex(keep);
       (g as THREE.BufferGeometry & { boundsTree?: MeshBVH }).boundsTree = undefined;
     }
-    for (const i of this.issues) if (i.type === 'triangle wound against its normals' || i.type === 'duplicate triangles (z-fighting)') i.fixed = true;
+    for (const i of this.issues) if (i.type === 'triangles wound against their normals' || i.type === 'duplicate triangles (z-fighting)') i.fixed = true;
     this.renderPanel();
     return { flipped, duplicates };
   }
@@ -420,21 +444,26 @@ export class Audit {
 
   private draw(): void {
     this.debug.clear();
+    // One instanced batch of markers per kind: tens of thousands of issues stay a handful of draw calls
     const marker = new THREE.SphereGeometry(0.6, 10, 8);
     const lines: number[] = [];
     const colours: number[] = [];
-    for (const i of this.issues) {
-      if (i.fixed) continue;
-      const mat = new THREE.MeshBasicMaterial({ color: MARK_COLOURS[i.kind], depthTest: false, transparent: true, opacity: 0.9 });
-      const s = new THREE.Mesh(marker, mat);
-      s.position.set(...i.position);
-      s.scale.setScalar(Math.max(1, Math.min(4, i.size / 2)));
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    for (const kind of ['A', 'B', 'C', 'D', 'E'] as IssueKind[]) {
+      const list = this.issues.filter((i) => i.kind === kind && !i.fixed);
+      if (!list.length) continue;
+      const mat = new THREE.MeshBasicMaterial({ color: MARK_COLOURS[kind], depthTest: false, transparent: true, opacity: 0.9 });
+      const s = new THREE.InstancedMesh(marker, mat, list.length);
+      list.forEach((i, n) => s.setMatrixAt(n, m4.compose(new THREE.Vector3(...i.position), q, scale.setScalar(Math.max(1, Math.min(4, i.size / 2))))));
+      s.frustumCulled = false;
       s.renderOrder = 999;
-      s.userData.issue = i.id;
       this.debug.add(s);
-      if (i.ray) {
+      const col = new THREE.Color(MARK_COLOURS[kind]);
+      for (const i of list) {
+        if (!i.ray) continue;
         lines.push(...i.ray);
-        const col = new THREE.Color(MARK_COLOURS[i.kind]);
         colours.push(col.r, col.g, col.b, col.r, col.g, col.b);
       }
     }

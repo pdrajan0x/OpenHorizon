@@ -35,6 +35,18 @@ static class UeMap
     const float DetailRadius = 8; // m: smaller meshes are detail (distance-culled in the game)
     const long PerMesh = 500_000; // triangles of one mesh over all its copies, at the LOD chosen
     const long PerMeshMax = 1_000_000; // …and if even its lightest LOD is over this, only some copies are placed
+    // A big mesh's last LODs can be far stand-ins: CARLA's procedural buildings end in a 58-triangle box
+    // showing a corner of the facade atlas (after 75 166, 37 582 and 18 792 triangles), right for a speck on
+    // the horizon and a smear up close. A LOD under 1/ProxyDrop of the one before it (and all after it)
+    // is left out for anything big enough to drive past, and those are never thinned out either.
+    const int ProxyDrop = 20;
+    // …except for copies this far (m, in 3D, from their bounds) from every road: seen from there, the stand-in's
+    // 1–3 px/m is about what the screen shows anyway (1080 px over a 60° view: 935 px/m at 1 m, 2 px/m at 450 m)
+    const float ProxyDistance = 250;
+    const int FacadeTex = 512; // px: the baked facade colour maps (one repeat is 7 m or so: 70 px/m)
+    static readonly string[] DiffuseSuffixes = ["_d", "_diff", "_diffuse", "_basecolor", "_bc", "_albedo", "_color", "_col", "_c"];
+    static readonly string[] NormalSuffixes = ["_n", "_norm", "_normal", "_nrm"];
+    static readonly string[] ColorNames = ["BaseColor", "Base Color", "Color", "Colour", "Albedo", "Diffuse", "Tint", "Param"];
     // Collision: driving surfaces exactly (their coarsest LOD); anything else solid as its oriented box
     // (12 triangles: a building, a pole, a bin); road markings, decals and foliage not at all
     static readonly string[] DriveWords = ["road", "ground", "terrain", "landscape", "sidewalk", "curb", "kerb", "bridge", "tunnel", "ramp", "parking", "plaza", "street", "highway", "stair", "floor"];
@@ -46,7 +58,12 @@ static class UeMap
     static readonly string[] FoliageWords = ["foliage", "vegetation", "tree", "bush", "plant", "grass", "hedge", "shrub", "ivy", "flower", "leaf", "leaves"];
 
     class Batch { public readonly List<float> Pos = [], Nrm = [], Uv = []; public readonly List<uint> Idx = []; public bool Detail; }
-    class Mat { public int Index; public string Shader = "", Diffuse, Normal; public bool Blend, Mask, Water; }
+    class Mat
+    {
+        public int Index; public string Shader = "", Diffuse, Normal; public bool Blend, Mask, Water;
+        public float[] Uv; // the scale and offset it applies to the mesh's UVs (su, sv, ou, ov), or null
+        public float World; // cm: mapped by world position on the plane it faces, a repeat this long (not by its UVs)
+    }
     class Mesh
     {
         public float[] Pos, Nrm, Uv; // local, Unreal frame
@@ -62,6 +79,8 @@ static class UeMap
         public double Keep = 1; // share of its copies placed
         public bool Drive, NoCollide; // collides exactly (a driving surface); doesn't collide at all
         public float[] Min, Max; // local bounds, Unreal frame (cm)
+        public float[] Center; // bounding sphere's centre, Unreal frame (cm)
+        public Mesh Proxy; // its far stand-in LOD, for the copies far from every road (see ProxyDistance)
     }
 
     // A box's 12 triangles over corners k = x | y << 1 | z << 2 (Unreal winding, faces outward)
@@ -82,7 +101,8 @@ static class UeMap
         return r;
     }
 
-    public static void Write(DefaultFileProvider p, string rootLevel, string xodr, string outDir)
+    /** `tiles`: only the large-map tiles whose level name matches (a test on part of a town) */
+    public static void Write(DefaultFileProvider p, string rootLevel, string xodr, string outDir, string tiles = null)
     {
         Directory.CreateDirectory(Path.Combine(outDir, "cells"));
         Directory.CreateDirectory(Path.Combine(outDir, "col"));
@@ -141,7 +161,7 @@ static class UeMap
                 foreach (var f in p.Files.Keys)
                 {
                     var m = re.Match(f);
-                    if (!m.Success) continue;
+                    if (!m.Success || tiles != null && !System.Text.RegularExpressions.Regex.IsMatch(f, tiles, System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
                     int tx = int.Parse(m.Groups[1].Value), ty = int.Parse(m.Groups[2].Value);
                     var lvl = f[..^5];
                     levels.Add(lvl);
@@ -155,9 +175,14 @@ static class UeMap
 
         // ---- Meshes, materials, placements ----
         var meshes = new Dictionary<string, Mesh>();
-        var mats = new Dictionary<string, Mat>();
+        var mats = new Dictionary<string, Mat>(); // by material path
+        var matList = new List<Mat>(); // …and by look: the thousands of per-building instances that look the same are one
+        var looks = new Dictionary<string, Mat>();
         var textures = new Dictionary<string, UTexture2D>(StringComparer.OrdinalIgnoreCase);
         var texNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // texture path → name used
+        var bakes = new Dictionary<string, Func<(byte[] rgba, int w, int h)>>(); // textures made here, by name
+        bool debug = Environment.GetEnvironmentVariable("UECONV_DEBUG") != null;
+        int debugged = 0;
         string TexName(UTexture2D t)
         {
             if (t == null) return null;
@@ -171,25 +196,71 @@ static class UeMap
         }
         Mat MatFor(UMaterialInterface mi)
         {
-            // A per-actor instance that sets no textures of its own (CARLA gives nearly every placed thing
-            // one) is its parent: one material, not thousands
-            if (mi is UMaterialInstance own && own.Parent is UMaterialInterface up
+            // A per-actor instance that sets nothing of its own (CARLA gives nearly every placed thing one;
+            // Town 13's buildings a MaterialInstanceDynamic each, saved in the level) is its parent
+            if (mi is UMaterialInstance own && own.Parent is UMaterialInterface up && own.GetPathName().Contains(':')
                 && (own.GetOrDefault<FTextureParameterValue[]>("TextureParameterValues")?.Length ?? 0) == 0
-                && own.GetPathName().Contains(":PersistentLevel.", StringComparison.Ordinal))
+                && (own.GetOrDefault<FVectorParameterValue[]>("VectorParameterValues")?.Length ?? 0) == 0
+                && (own.GetOrDefault<FScalarParameterValue[]>("ScalarParameterValues")?.Length ?? 0) == 0)
                 return MatFor(up);
             var key = mi?.GetPathName() ?? "none";
             if (mats.TryGetValue(key, out var m)) return m;
-            m = new Mat { Index = mats.Count };
+            m = new Mat();
             mats[key] = m;
-            if (mi == null) return m;
+            if (mi != null) Resolve(mi, key, m);
+            var look = $"{m.Shader}|{m.Diffuse}|{m.Normal}|{m.Blend}|{m.Mask}|{m.Water}|{m.World}|{(m.Uv == null ? "" : string.Join(",", m.Uv))}";
+            if (!looks.TryGetValue(look, out var same))
+            {
+                looks[look] = same = m;
+                m.Index = matList.Count;
+                matList.Add(m);
+            }
+            return mats[key] = same;
+        }
+        void Resolve(UMaterialInterface mi, string key, Mat m)
+        {
+            // The base material's name: what it is (glass, water, decal…)
+            UObject cur = mi;
+            for (int i = 0; i < 8 && cur is UMaterialInstance inst && inst.Parent != null; i++) cur = inst.Parent;
+            m.Shader = (cur?.Name ?? mi.Name).ToLowerInvariant();
+            var mp = new CMaterialParams2();
             try
             {
-                var mp = new CMaterialParams2();
                 mi.GetParams(mp, EMaterialDepth.AllLayers);
                 if (mp.TryGetTexture2d(out var d, CMaterialParams2.Diffuse[0]) || mp.TryGetTexture2d(out d, CMaterialParams2.FallbackDiffuse)) m.Diffuse = TexName(d as UTexture2D);
                 if (mp.TryGetTexture2d(out var nrm, CMaterialParams2.Normals[0]) || mp.TryGetTexture2d(out nrm, CMaterialParams2.FallbackNormals)) m.Normal = TexName(nrm as UTexture2D);
+                // No parameter by those names: a texture by its name (the towns' own road and ground
+                // materials sample Asphalt1_Diff, Concrete1_Norm… directly)
+                m.Diffuse ??= TexName(ByName(mp, DiffuseSuffixes));
+                m.Normal ??= TexName(ByName(mp, NormalSuffixes));
                 m.Blend = mp.BlendMode is EBlendMode.BLEND_Translucent or EBlendMode.BLEND_Additive or EBlendMode.BLEND_Modulate;
                 m.Mask = mp.BlendMode == EBlendMode.BLEND_Masked;
+                float S(string n, float or) => mp.Scalars.TryGetValue(n, out var v) ? v : or;
+                if (m.Shader == "m_facademaster" && mp.Textures.GetValueOrDefault("FusionTexture") is UTexture2D scan)
+                {
+                    // CARLA's procedural facades have no colour map: their shader colours a scan by world
+                    // position. Baked here, and mapped the same way (Place)
+                    var noise = mp.Textures.GetValueOrDefault("NoiseORM") as UTexture2D;
+                    var t = mp.Colors.TryGetValue("Tint", out var c) ? new[] { c.R, c.G, c.B } : [1f, 1f, 1f];
+                    int channel = Math.Clamp((int)Math.Round(S("TextureSelector", 0)), 0, 3);
+                    // Near-identical tints (to 1/64 in sRGB) share a map
+                    var q = t.Select(v => (float)Math.Round(Srgb(v) * 64) / 64).ToArray();
+                    float hue2 = MathF.Round(S("HueSecondColor", 0), 2), hue = MathF.Round(S("Hue", 0), 2), sat = MathF.Round(S("Saturation", 1), 2), bright = MathF.Round(S("Brightness", 1), 2), ao = MathF.Round(S("AO Power", 1), 2);
+                    bool invert = S("InvertAO", 0) > 0.5f;
+                    var recipe = $"{scan.GetPathName()}|{noise?.GetPathName()}|{channel}|{string.Join(",", q)}|{hue2}|{hue}|{sat}|{bright}|{ao}|{invert}";
+                    var name = $"facade_{scan.Name}_{Fnv(recipe):x8}";
+                    var lin = q.Select(Linear).ToArray();
+                    bakes.TryAdd(name, () => BakeFacade(scan, noise, channel, lin, hue2, hue, sat, bright, ao, invert));
+                    m.Diffuse = name;
+                    m.World = S("Tiling", 700);
+                    if (debug && debugged++ < 40) Console.WriteLine($"  facade {key}: {scan.Name}[{channel}] tint {string.Join(",", t.Select(v => v.ToString("F3")))} hue2 {hue2} hue {hue} sat {sat} bright {bright} ao {ao} tiling {m.World}");
+                }
+                // The building atlas: sampled at UV × (Scale X, Scale Y) + (Offset X, Offset Y)
+                if (m.Shader == "m_proceduralbuildingmaster")
+                {
+                    var uv = new[] { S("Scale X", 1), S("Scale Y", 1), S("Offset X", 0), S("Offset Y", 0) };
+                    if (uv[0] != 1 || uv[1] != 1 || uv[2] != 0 || uv[3] != 0) m.Uv = uv;
+                }
             }
             catch (Exception e) { Console.WriteLine($"  ! material {key}: {e.Message}"); }
             // Textures it doesn't set come from its parents
@@ -198,17 +269,22 @@ static class UeMap
                 var pm = MatFor(parent0);
                 m.Diffuse ??= pm.Diffuse;
                 m.Normal ??= pm.Normal;
+                if (m.Diffuse == pm.Diffuse) { m.World = pm.World; m.Uv ??= pm.Uv; }
             }
-            if (m.Diffuse == null && Environment.GetEnvironmentVariable("UECONV_DEBUG") != null && mats.Count < 400)
-                Console.WriteLine($"  no diffuse: {key} ({mi.ExportType}) parent {(mi as UMaterialInstance)?.Parent?.GetPathName()}");
-            // The base material's name: what it is (glass, water, decal…)
-            UObject cur = mi;
-            for (int i = 0; i < 8 && cur is UMaterialInstance inst && inst.Parent != null; i++) cur = inst.Parent;
-            m.Shader = (cur?.Name ?? mi.Name).ToLowerInvariant();
             // Glass, and the fake room interiors behind windows (cube maps we don't draw): shiny glass
             if (m.Shader.Contains("glass") || m.Shader.Contains("fakeinterior") || mi.Name.Contains("glass", StringComparison.OrdinalIgnoreCase)) m.Shader += "_glass";
+            // Still no texture: its colour, if it has one (RoadRunner's ground and sidewalk materials are one
+            // grey "Param"), as a 4×4 map
+            if (m.Diffuse == null && !m.Shader.EndsWith("_glass") && !m.Shader.Contains("skytimeofday")
+                && (ColorNames.Select(n => mp.Colors.TryGetValue(n, out var c) ? c : (FLinearColor?)null).FirstOrDefault(c => c != null) ?? (mp.Colors.Count == 1 ? mp.Colors.Values.First() : null)) is { } col)
+            {
+                var rgb = new[] { col.R, col.G, col.B }.Select(v => (byte)Math.Round(Srgb(v) * 255)).ToArray();
+                m.Diffuse = $"solid_{rgb[0]:x2}{rgb[1]:x2}{rgb[2]:x2}";
+                bakes.TryAdd(m.Diffuse, () => (Enumerable.Range(0, 64).Select(i => i % 4 == 3 ? (byte)255 : rgb[i % 4]).ToArray(), 4, 4));
+            }
+            if (m.Diffuse == null && debug && debugged++ < 400)
+                Console.WriteLine($"  no diffuse: {key} ({mi.ExportType}) parent {(mi as UMaterialInstance)?.Parent?.GetPathName()}");
             m.Water = m.Shader.Contains("water") || mi.Name.Contains("water", StringComparison.OrdinalIgnoreCase) || (m.Normal ?? "").Contains("water", StringComparison.OrdinalIgnoreCase) || (m.Diffuse ?? "").Contains("water", StringComparison.OrdinalIgnoreCase);
-            return m;
         }
         // The LOD: the most detailed within a budget for one copy (by size) and for all its copies in the
         // map together, so a tree planted 50 000 times comes at its lightest and a one-off tower keeps its detail
@@ -222,36 +298,56 @@ static class UeMap
             float radius = (sm.RenderData.Bounds?.SphereRadius ?? 100) / 100f;
             long budget = radius < 3 ? 1500 : radius < 10 ? 5000 : radius < 40 ? 30000 : 150000;
             long Tris(FStaticMeshLODResources l) => l.Sections.Sum(s => (long)s.NumTriangles);
-            var lod = lods.FirstOrDefault(l => Tris(l) <= budget && Tris(l) * copies <= PerMesh) ?? lods[^1];
-            var col = lods.LastOrDefault(l => Tris(l) >= 12) ?? lod;
-            int n = lod.PositionVertexBuffer!.Verts.Length;
-            mesh = new Mesh { Pos = new float[n * 3], Nrm = new float[n * 3], Uv = new float[n * 2], Idx = lod.IndexBuffer!.Buffer!, Radius = radius, Triangles = Tris(lod), Name = $"{sm.Name} (LOD {Array.IndexOf(lods, lod)}/{lods.Length}, r {radius:F1} m)" };
-            for (int i = 0; i < n; i++)
+            var lower = key.ToLowerInvariant();
+            bool foliage = FoliageWords.Any(lower.Contains), structure = !foliage && radius >= DetailRadius;
+            var usable = lods;
+            if (structure)
             {
-                var v = lod.PositionVertexBuffer.Verts[i];
-                mesh.Pos[i * 3] = v.X; mesh.Pos[i * 3 + 1] = v.Y; mesh.Pos[i * 3 + 2] = v.Z;
-                var item = lod.VertexBuffer!.UV[i];
-                var nn = (FVector)item.Normal[2];
-                mesh.Nrm[i * 3] = nn.X; mesh.Nrm[i * 3 + 1] = nn.Y; mesh.Nrm[i * 3 + 2] = nn.Z;
-                if (item.UV.Length > 0) { mesh.Uv[i * 2] = item.UV[0].U; mesh.Uv[i * 2 + 1] = item.UV[0].V; }
+                int k = 1;
+                while (k < lods.Length && Tris(lods[k]) * ProxyDrop >= Tris(lods[k - 1])) k++;
+                usable = lods[..k];
             }
-            mesh.Sections = lod.Sections.Select(s => (s.MaterialIndex, s.FirstIndex, s.NumTriangles)).ToArray();
+            var lod = usable.FirstOrDefault(l => Tris(l) <= budget && Tris(l) * copies <= PerMesh) ?? usable[^1];
+            var col = lods.LastOrDefault(l => Tris(l) >= 12) ?? lod;
+            Mesh Geometry(FStaticMeshLODResources l)
+            {
+                int n = l.PositionVertexBuffer!.Verts.Length;
+                var g = new Mesh { Pos = new float[n * 3], Nrm = new float[n * 3], Uv = new float[n * 2], Idx = l.IndexBuffer!.Buffer!, Radius = radius, Triangles = Tris(l), Name = $"{sm.Name} (LOD {Array.IndexOf(lods, l)}/{lods.Length}, r {radius:F1} m)" };
+                for (int i = 0; i < n; i++)
+                {
+                    var v = l.PositionVertexBuffer.Verts[i];
+                    g.Pos[i * 3] = v.X; g.Pos[i * 3 + 1] = v.Y; g.Pos[i * 3 + 2] = v.Z;
+                    var item = l.VertexBuffer!.UV[i];
+                    var nn = (FVector)item.Normal[2];
+                    g.Nrm[i * 3] = nn.X; g.Nrm[i * 3 + 1] = nn.Y; g.Nrm[i * 3 + 2] = nn.Z;
+                    if (item.UV.Length > 0) { g.Uv[i * 2] = item.UV[0].U; g.Uv[i * 2 + 1] = item.UV[0].V; }
+                }
+                g.Sections = l.Sections.Select(q => (q.MaterialIndex, q.FirstIndex, q.NumTriangles)).ToArray();
+                return g;
+            }
+            mesh = Geometry(lod);
             mesh.Mats = sm.StaticMaterials.Select(s => MatFor(s.MaterialInterface?.Load<UMaterialInterface>())).ToArray();
             if (mesh.Mats.Length == 0) mesh.Mats = sm.Materials.Select(mi => MatFor(mi?.Load<UMaterialInterface>())).ToArray();
             int cn = col.PositionVertexBuffer!.Verts.Length;
             mesh.ColPos = new float[cn * 3];
             for (int i = 0; i < cn; i++) { var v = col.PositionVertexBuffer.Verts[i]; mesh.ColPos[i * 3] = v.X; mesh.ColPos[i * 3 + 1] = v.Y; mesh.ColPos[i * 3 + 2] = v.Z; }
             mesh.ColIdx = col.IndexBuffer!.Buffer!;
-            var lower = key.ToLowerInvariant();
-            mesh.Foliage = FoliageWords.Any(lower.Contains);
+            mesh.Foliage = foliage;
             mesh.Drive = DriveWords.Any(lower.Contains) || radius > 60;
             mesh.NoCollide = NoCollideWords.Any(lower.Contains);
             mesh.Min = [float.MaxValue, float.MaxValue, float.MaxValue];
             mesh.Max = [float.MinValue, float.MinValue, float.MinValue];
             for (int i = 0; i < mesh.Pos.Length; i += 3)
                 for (int k = 0; k < 3; k++) { mesh.Min[k] = Math.Min(mesh.Min[k], mesh.Pos[i + k]); mesh.Max[k] = Math.Max(mesh.Max[k], mesh.Pos[i + k]); }
-            // Still over the budget at its lightest: keep an even share of its copies
-            mesh.Keep = Math.Min(1, (double)PerMeshMax / Math.Max(1, mesh.Triangles * copies));
+            var o = sm.RenderData.Bounds?.Origin ?? new FVector(0, 0, 0);
+            mesh.Center = [o.X, o.Y, o.Z];
+            // Still over the budget at its lightest: keep an even share of its copies (not of the buildings)
+            mesh.Keep = structure ? 1 : Math.Min(1, (double)PerMeshMax / Math.Max(1, mesh.Triangles * copies));
+            if (usable.Length < lods.Length && roads is { Nodes.Count: > 0 })
+            {
+                var px = mesh.Proxy = Geometry(lods[^1]);
+                (px.Mats, px.ColPos, px.ColIdx, px.Foliage, px.Drive, px.NoCollide, px.Min, px.Max, px.Center) = (mesh.Mats, mesh.ColPos, mesh.ColIdx, mesh.Foliage, mesh.Drive, mesh.NoCollide, mesh.Min, mesh.Max, mesh.Center);
+            }
             meshes[key] = mesh;
             return mesh;
         }
@@ -259,7 +355,8 @@ static class UeMap
         var cells = new Dictionary<(int, int), Dictionary<int, Batch>>();
         var colCells = new Dictionary<(int, int), (List<float> v, List<uint> i)>();
         long triangles = 0, colTris = 0;
-        int placedCount = 0, skipped = 0;
+        int placedCount = 0, skipped = 0, mirrored = 0;
+        long against = 0;
         var bmin = (x: double.MaxValue, z: double.MaxValue); var bmax = (x: double.MinValue, z: double.MinValue);
 
         var cost = new Dictionary<Mesh, (string name, long count)>();
@@ -267,11 +364,15 @@ static class UeMap
         {
             placedCount++;
             cost[mesh] = (cost.GetValueOrDefault(mesh).name ?? mesh.Name, cost.GetValueOrDefault(mesh).count + 1);
-            // Normals: the inverse transpose of the 3×3 part (non-uniform scale); a mirrored placement flips winding
+            // Normals (row vectors, as positions): n' = n · M⁻ᵀ = n · C / det over the 3×3 part M, C its
+            // cofactor matrix (right under non-uniform scale). The determinant's sign counts: a mirrored copy
+            // would be lit from behind. A mirrored placement also flips winding.
             double a = w[0], b = w[1], c = w[2], d = w[4], e = w[5], f = w[6], g = w[8], h = w[9], k = w[10];
             double det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
             bool flip = det < 0;
-            double[] it = [(e * k - f * h), -(d * k - f * g), (d * h - e * g), -(b * k - c * h), (a * k - c * g), -(a * h - b * g), (b * f - c * e), -(a * f - c * d), (a * e - b * d)];
+            if (flip) mirrored++;
+            double sg = flip ? -1 : 1;
+            double[] cof = [sg * (e * k - f * h), -sg * (d * k - f * g), sg * (d * h - e * g), -sg * (b * k - c * h), sg * (a * k - c * g), -sg * (a * h - b * g), sg * (b * f - c * e), -sg * (a * f - c * d), sg * (a * e - b * d)];
             (float, float, float) P(float[] src, int v)
             {
                 double x = src[v * 3], y = src[v * 3 + 1], z = src[v * 3 + 2];
@@ -303,15 +404,32 @@ static class UeMap
                             remap[vi] = ni;
                             batch.Pos.Add(pp.Item1); batch.Pos.Add(pp.Item2); batch.Pos.Add(pp.Item3);
                             double nx = mesh.Nrm[vi * 3], ny = mesh.Nrm[vi * 3 + 1], nz = mesh.Nrm[vi * 3 + 2];
-                            double tx = nx * it[0] + ny * it[1] + nz * it[2], ty = nx * it[3] + ny * it[4] + nz * it[5], tz = nx * it[6] + ny * it[7] + nz * it[8];
+                            double tx = nx * cof[0] + ny * cof[3] + nz * cof[6], ty = nx * cof[1] + ny * cof[4] + nz * cof[7], tz = nx * cof[2] + ny * cof[5] + nz * cof[8];
                             double len = Math.Sqrt(tx * tx + ty * ty + tz * tz);
                             if (len < 1e-9 || double.IsNaN(len)) { tx = 0; ty = 0; tz = 1; len = 1; }
                             // Unreal (x, y, z) → game (x, z, y)
                             batch.Nrm.Add((float)(tx / len)); batch.Nrm.Add((float)(tz / len)); batch.Nrm.Add((float)(ty / len));
-                            batch.Uv.Add(mesh.Uv[vi * 2]); batch.Uv.Add(mesh.Uv[vi * 2 + 1]);
+                            float u = mesh.Uv[vi * 2], v = mesh.Uv[vi * 2 + 1];
+                            if (mat.World > 0)
+                            {
+                                // By world position (Unreal cm) on the axis plane it most faces, as the material's
+                                // shader does, less the whole repeats to the copy's origin (small numbers)
+                                double T = mat.World, ax = Math.Abs(tx), ay = Math.Abs(ty), az = Math.Abs(tz);
+                                double ux = pp.Item1 * 100 / T - Math.Floor((w[12] - ox * 100) / T), uy = pp.Item3 * 100 / T - Math.Floor((w[13] - oz * 100) / T), uz = pp.Item2 * 100 / T - Math.Floor(w[14] / T);
+                                (u, v) = ax >= ay && ax >= az ? ((float)uy, (float)uz) : ay >= az ? ((float)ux, (float)uz) : ((float)ux, (float)uy);
+                            }
+                            else if (mat.Uv != null) (u, v) = (u * mat.Uv[0] + mat.Uv[2], v * mat.Uv[1] + mat.Uv[3]);
+                            batch.Uv.Add(u); batch.Uv.Add(v);
                         }
                         batch.Idx.Add(ni);
                     }
+                    // A check (the game's geometry audit makes the same): wound against its normals?
+                    int n0 = (int)batch.Idx[^3] * 3, n1 = (int)batch.Idx[^2] * 3, n2 = (int)batch.Idx[^1] * 3;
+                    double e1x = p1.Item1 - p0.Item1, e1y = p1.Item2 - p0.Item2, e1z = p1.Item3 - p0.Item3, e2x = p2.Item1 - p0.Item1, e2y = p2.Item2 - p0.Item2, e2z = p2.Item3 - p0.Item3;
+                    double fx = e1y * e2z - e1z * e2y, fy = e1z * e2x - e1x * e2z, fz = e1x * e2y - e1y * e2x;
+                    double sx = batch.Nrm[n0] + batch.Nrm[n1] + batch.Nrm[n2], sy = batch.Nrm[n0 + 1] + batch.Nrm[n1 + 1] + batch.Nrm[n2 + 1], sz = batch.Nrm[n0 + 2] + batch.Nrm[n1 + 2] + batch.Nrm[n2 + 2];
+                    double fl = Math.Sqrt(fx * fx + fy * fy + fz * fz), sl = Math.Sqrt(sx * sx + sy * sy + sz * sz);
+                    if (fl > 0.02 && sl > 1e-3 && (fx * sx + fy * sy + fz * sz) / (fl * sl) < -0.9) against++;
                     triangles++;
                     bmin = (Math.Min(bmin.x, cx), Math.Min(bmin.z, cz)); bmax = (Math.Max(bmax.x, cx), Math.Max(bmax.z, cz));
                 }
@@ -391,6 +509,31 @@ static class UeMap
             pkg = null;
             GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         }
+        // A copy's distance to the nearest road (3D, from its bounding sphere), for the far stand-ins
+        const float Grid = 100;
+        var roadGrid = new Dictionary<(int, int), List<(double x, double y, double z)>>();
+        foreach (var n in roads?.Nodes ?? [])
+        {
+            var q = (n.x - ox, n.y, n.z - oz);
+            var g = ((int)Math.Floor(q.Item1 / Grid), (int)Math.Floor(q.Item3 / Grid));
+            if (!roadGrid.TryGetValue(g, out var list)) roadGrid[g] = list = [];
+            list.Add(q);
+        }
+        double RoadDistance(Mesh mesh, double[] w)
+        {
+            double x = mesh.Center[0], y = mesh.Center[1], z = mesh.Center[2];
+            double cx = (x * w[0] + y * w[4] + z * w[8] + w[12]) / 100 - ox, cy = (x * w[2] + y * w[6] + z * w[10] + w[14]) / 100, cz = (x * w[1] + y * w[5] + z * w[9] + w[13]) / 100 - oz;
+            double r = mesh.Radius * Math.Cbrt(Math.Abs(w[0] * (w[5] * w[10] - w[6] * w[9]) - w[1] * (w[4] * w[10] - w[6] * w[8]) + w[2] * (w[4] * w[9] - w[5] * w[8])));
+            int reach = (int)Math.Ceiling((ProxyDistance + r) / Grid), gx = (int)Math.Floor(cx / Grid), gz = (int)Math.Floor(cz / Grid);
+            double best = double.MaxValue;
+            for (int dx = -reach; dx <= reach; dx++)
+                for (int dz = -reach; dz <= reach; dz++)
+                    if (roadGrid.TryGetValue((gx + dx, gz + dz), out var list))
+                        foreach (var (nx, ny, nz) in list) best = Math.Min(best, (nx - cx) * (nx - cx) + (ny - cy) * (ny - cy) + (nz - cz) * (nz - cz));
+            return Math.Max(0, Math.Sqrt(best) - r);
+        }
+        long[] farCopies = new long[6], farTris = new long[6]; // structures with a stand-in, by road distance: < 50, 100, 150, 250, 400 m, more
+
         // Pass 2: geometry, one mesh at a time (loaded, placed everywhere, let go)
         var kept = new Dictionary<Mesh, double>();
         int loadedMeshes = 0;
@@ -414,16 +557,26 @@ static class UeMap
                     kept[mesh] = acc + mesh.Keep;
                     if (Math.Floor(acc + mesh.Keep) == Math.Floor(acc)) continue;
                 }
-                Place(mesh, world, overrides, foliage);
+                var use = mesh;
+                if (mesh.Proxy != null)
+                {
+                    double d = RoadDistance(mesh, world);
+                    int bin = d < 50 ? 0 : d < 100 ? 1 : d < 150 ? 2 : d < 250 ? 3 : d < 400 ? 4 : 5;
+                    farCopies[bin]++; farTris[bin] += mesh.Triangles;
+                    if (d > ProxyDistance) use = mesh.Proxy;
+                }
+                Place(use, world, overrides, foliage);
             }
             // Its geometry is in the cells now
-            mesh.Pos = mesh.Nrm = mesh.Uv = mesh.ColPos = null;
-            mesh.Idx = mesh.ColIdx = null;
+            foreach (var m in new[] { mesh, mesh.Proxy })
+                if (m != null) { m.Pos = m.Nrm = m.Uv = m.ColPos = null; m.Idx = m.ColIdx = null; }
             if (++loadedMeshes % 40 == 0) GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         }
         foreach (var (m, (name, count)) in cost.OrderByDescending(kv => kv.Key.Triangles * kv.Value.count).Take(20))
             Console.WriteLine($"  {m.Triangles * count / 1e6,8:F2} M tris  {count,6} × {m.Triangles,7}  {name}{(m.Foliage ? " [foliage]" : "")}");
-        Console.WriteLine($"placed {placedCount} ({skipped} hidden), {meshes.Count(m => m.Value != null)} meshes, {mats.Count} materials, {triangles} tris, {colTris} collision tris");
+        if (farCopies.Sum() > 0)
+            Console.WriteLine($"buildings with a far stand-in, by distance to a road (<50/100/150/250/400/more m): {string.Join(" ", farCopies)} copies, {string.Join(" ", farTris.Select(t => $"{t / 1e6:F1}"))} M tris at their real LOD; the stand-in beyond {ProxyDistance} m");
+        Console.WriteLine($"placed {placedCount} ({skipped} hidden, {mirrored} mirrored), {meshes.Count(m => m.Value != null)} meshes, {matList.Count} materials ({mats.Count} before merging alike), {triangles} tris ({against} wound against their normals), {colTris} collision tris");
 
         // ---- Crop: cells far from every road are backdrop ----
         if (roads is { Nodes.Count: > 0 })
@@ -452,7 +605,6 @@ static class UeMap
         }
 
         // ---- Write cells (the tools/gta5conv format) ----
-        var matList = mats.Values.OrderBy(m => m.Index).ToList();
         var cellList = new JsonArray();
         var usedTex = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int cellId = 0;
@@ -519,7 +671,17 @@ static class UeMap
         var missing = new List<string>();
         foreach (var name in usedTex)
         {
-            try { if (WriteTexture(textures[name], Path.Combine(outDir, "tex", name + ".gtx"))) { written++; continue; } }
+            try
+            {
+                var file = Path.Combine(outDir, "tex", name + ".gtx");
+                if (bakes.TryGetValue(name, out var bake))
+                {
+                    var (rgba, w, h) = bake();
+                    Bc.WriteGtx(file, 1, Bc.Chain(rgba, w, h, false));
+                    written++; continue;
+                }
+                if (WriteTexture(textures[name], file)) { written++; continue; }
+            }
             catch (Exception e) { Console.WriteLine($"  ! texture {name}: {e.Message}"); }
             missing.Add(name);
         }
@@ -574,16 +736,12 @@ static class UeMap
     static bool WriteTexture(UTexture2D t, string file)
     {
         var mips = t.PlatformData.Mips;
-        int first = -1;
-        for (int i = 0; i < mips.Length; i++)
-            if (Math.Max(mips[i].SizeX, mips[i].SizeY) <= MaxTex && mips[i].EnsureValidBulkData(t.MipDataProvider, i)) { first = i; break; }
-        // Nothing small enough (some ship one big level and no mips): the largest there is, scaled down below
-        if (first < 0)
-            for (int i = 0; i < mips.Length && first < 0; i++)
-                if (mips[i].EnsureValidBulkData(t.MipDataProvider, i)) first = i;
+        int first = FirstMip(t, MaxTex);
         if (first < 0) return false;
-        // DXT with its own mip chain: copied as it is
-        if (t.Format is EPixelFormat.PF_DXT1 or EPixelFormat.PF_DXT5 && mips.Length - first > 1 && Math.Max(mips[first].SizeX, mips[first].SizeY) <= MaxTex)
+        // DXT with its own mip chain: copied as it is (if a power of two: WebGL takes no compressed mip that
+        // isn't a multiple of 4, and 720 px halves to 45)
+        if (t.Format is EPixelFormat.PF_DXT1 or EPixelFormat.PF_DXT5 && mips.Length - first > 1 && Math.Max(mips[first].SizeX, mips[first].SizeY) <= MaxTex
+            && Pow2(mips[first].SizeX) && Pow2(mips[first].SizeY))
         {
             int block = t.Format == EPixelFormat.PF_DXT1 ? 8 : 16;
             var levels = new List<(int, int, byte[])>();
@@ -600,8 +758,43 @@ static class UeMap
             Bc.WriteGtx(file, t.Format == EPixelFormat.PF_DXT1 ? 1 : 5, levels);
             return true;
         }
-        var ct = t.Decode(mips[first]);
-        if (ct == null) return false;
+        if (Rgba(t, MaxTex) is not var (rgba, w, h)) return false;
+        bool normal = t.IsNormalMap || t.Format == EPixelFormat.PF_BC5;
+        bool alpha = false;
+        for (int i = 0; i < w * h; i++)
+        {
+            if (normal)
+            {
+                // Two-channel normal maps: rebuild z
+                double nx = rgba[i * 4] / 127.5 - 1, ny = rgba[i * 4 + 1] / 127.5 - 1;
+                rgba[i * 4 + 2] = (byte)Math.Clamp((Math.Sqrt(Math.Max(0, 1 - nx * nx - ny * ny)) * 0.5 + 0.5) * 255, 0, 255);
+                rgba[i * 4 + 3] = 255;
+            }
+            else if (rgba[i * 4 + 3] < 250) alpha = true;
+        }
+        Bc.WriteGtx(file, alpha ? 5 : 1, Bc.Chain(rgba, w, h, alpha));
+        return true;
+    }
+
+    /** The first mip level no bigger than `max` px (or, with nothing that small, the largest there is). */
+    static int FirstMip(UTexture2D t, int max)
+    {
+        var mips = t.PlatformData.Mips;
+        for (int i = 0; i < mips.Length; i++)
+            if (Math.Max(mips[i].SizeX, mips[i].SizeY) <= max && mips[i].EnsureValidBulkData(t.MipDataProvider, i)) return i;
+        // Nothing small enough (some ship one big level and no mips): the largest there is, scaled down in Rgba
+        for (int i = 0; i < mips.Length; i++)
+            if (mips[i].EnsureValidBulkData(t.MipDataProvider, i)) return i;
+        return -1;
+    }
+
+    /** A texture decoded to RGBA8, at most `max` px, sized in powers of two. */
+    static (byte[] rgba, int w, int h)? Rgba(UTexture2D t, int max)
+    {
+        int first = FirstMip(t, max);
+        if (first < 0) return null;
+        var ct = t.Decode(t.PlatformData.Mips[first]);
+        if (ct == null) return null;
         int w = ct.Width, h = ct.Height;
         var src = ct.Data;
         var rgba = new byte[w * h * 4];
@@ -618,10 +811,12 @@ static class UeMap
                 break;
             default:
                 Console.WriteLine($"  ! texture {t.Name}: decoded as {ct.PixelFormat}");
-                return false;
+                return null;
         }
-        // Down to MaxTex (2×2 box)
-        while (w > MaxTex || h > MaxTex)
+        // Sizes WebGL can mip when compressed: a power of two (the next one up, to `max`), halved down to
+        // under twice that, then resampled
+        int pw = Math.Min(max, (int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)w)), ph = Math.Min(max, (int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)h));
+        while (w >= 2 * pw || h >= 2 * ph)
         {
             int nw = Math.Max(1, w >> 1), nh = Math.Max(1, h >> 1);
             var next = new byte[nw * nh * 4];
@@ -632,20 +827,96 @@ static class UeMap
                             + rgba[(Math.Min(h - 1, 2 * y + 1) * w + 2 * x) * 4 + k] + rgba[(Math.Min(h - 1, 2 * y + 1) * w + Math.Min(w - 1, 2 * x + 1)) * 4 + k] + 2) >> 2);
             rgba = next; w = nw; h = nh;
         }
-        bool normal = t.IsNormalMap || t.Format == EPixelFormat.PF_BC5;
-        bool alpha = false;
-        for (int i = 0; i < w * h; i++)
-        {
-            if (normal)
+        return pw == w && ph == h ? (rgba, w, h) : (Resize(rgba, w, h, pw, ph), pw, ph);
+    }
+    static bool Pow2(int n) => n > 0 && (n & (n - 1)) == 0;
+
+    /** Resampled: each new pixel the mean of the old ones it covers (bilinear when growing). */
+    static byte[] Resize(byte[] src, int w, int h, int nw, int nh)
+    {
+        var dst = new byte[nw * nh * 4];
+        for (int y = 0; y < nh; y++)
+            for (int x = 0; x < nw; x++)
             {
-                // Two-channel normal maps: rebuild z
-                double nx = rgba[i * 4] / 127.5 - 1, ny = rgba[i * 4 + 1] / 127.5 - 1;
-                rgba[i * 4 + 2] = (byte)Math.Clamp((Math.Sqrt(Math.Max(0, 1 - nx * nx - ny * ny)) * 0.5 + 0.5) * 255, 0, 255);
-                rgba[i * 4 + 3] = 255;
+                double x0 = (double)x * w / nw, x1 = (double)(x + 1) * w / nw, y0 = (double)y * h / nh, y1 = (double)(y + 1) * h / nh;
+                if (x1 - x0 <= 1 && y1 - y0 <= 1)
+                {
+                    // Growing: bilinear between the nearest four
+                    double fx = Math.Clamp((x + 0.5) * w / nw - 0.5, 0, w - 1), fy = Math.Clamp((y + 0.5) * h / nh - 0.5, 0, h - 1);
+                    int ix = (int)fx, iy = (int)fy, jx = Math.Min(w - 1, ix + 1), jy = Math.Min(h - 1, iy + 1);
+                    double ax = fx - ix, ay = fy - iy;
+                    for (int k = 0; k < 4; k++)
+                        dst[(y * nw + x) * 4 + k] = (byte)Math.Round((src[(iy * w + ix) * 4 + k] * (1 - ax) + src[(iy * w + jx) * 4 + k] * ax) * (1 - ay)
+                            + (src[(jy * w + ix) * 4 + k] * (1 - ax) + src[(jy * w + jx) * 4 + k] * ax) * ay);
+                    continue;
+                }
+                double[] sum = new double[4];
+                double wsum = 0;
+                for (int sy = (int)y0; sy < Math.Min(h, (int)Math.Ceiling(y1)); sy++)
+                    for (int sx = (int)x0; sx < Math.Min(w, (int)Math.Ceiling(x1)); sx++)
+                    {
+                        double wt = (Math.Min(x1, sx + 1) - Math.Max(x0, sx)) * (Math.Min(y1, sy + 1) - Math.Max(y0, sy));
+                        for (int k = 0; k < 4; k++) sum[k] += src[(sy * w + sx) * 4 + k] * wt;
+                        wsum += wt;
+                    }
+                for (int k = 0; k < 4; k++) dst[(y * nw + x) * 4 + k] = (byte)Math.Round(sum[k] / wsum);
             }
-            else if (rgba[i * 4 + 3] < 250) alpha = true;
-        }
-        Bc.WriteGtx(file, alpha ? 5 : 1, Bc.Chain(rgba, w, h, alpha));
-        return true;
+        return dst;
+    }
+
+    /** A texture among a material's by its name's ending (placeholders like T_Flat_White_d aside). */
+    static UTexture2D ByName(CMaterialParams2 mp, string[] suffixes) =>
+        mp.Textures.Values.OfType<UTexture2D>().FirstOrDefault(t => !t.Name.StartsWith("T_Flat", StringComparison.OrdinalIgnoreCase)
+            && !t.Name.StartsWith("Default", StringComparison.OrdinalIgnoreCase) && suffixes.Any(x => t.Name.EndsWith(x, StringComparison.OrdinalIgnoreCase)));
+
+    static uint Fnv(string s)
+    {
+        uint h = 2166136261;
+        foreach (var ch in s) h = (h ^ ch) * 16777619;
+        return h;
+    }
+    static float Srgb(float c) => c <= 0.0031308f ? 12.92f * Math.Max(0, c) : 1.055f * MathF.Pow(Math.Min(c, 1), 1 / 2.4f) - 0.055f;
+    static float Linear(float c) => c <= 0.04045f ? c / 12.92f : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+
+    /** Unreal's HueShift: the colour turned about the grey axis by a share of a full turn. */
+    static float[] HueShift(float[] c, float turn)
+    {
+        const float k = 0.57735026f;
+        float dot = (c[0] + c[1] + c[2]) * k, cos = MathF.Cos(turn * 2 * MathF.PI), sin = MathF.Sin(turn * 2 * MathF.PI);
+        float[] p = [k * dot, k * dot, k * dot], u = [c[0] - p[0], c[1] - p[1], c[2] - p[2]];
+        float[] v = [k * (u[2] - u[1]), k * (u[0] - u[2]), k * (u[1] - u[0])]; // axis × u
+        return [p[0] + u[0] * cos + v[0] * sin, p[1] + u[1] * cos + v[1] * sin, p[2] + u[2] * cos + v[2] * sin];
+    }
+
+    /**
+     * M_FacadeMaster's base colour, baked (the material has no colour map; this is what its cooked SPIR-V
+     * computes): one channel of an ORM scan (TextureSelector) times the tint, blended towards the tint
+     * hue-shifted by HueSecondColor where the noise texture's green (+0.3) says, then hue, saturation and
+     * brightness, and the scan's grooves darkened (levels up to 0.7, to the power AO Power).
+     */
+    static (byte[], int, int) BakeFacade(UTexture2D scan, UTexture2D noise, int channel, float[] tint, float hue2, float hue, float saturation, float brightness, float aoPower, bool invertAo)
+    {
+        var (src, w, h) = Rgba(scan, FacadeTex) ?? (new byte[] { 255, 255, 255, 255 }, 1, 1);
+        var (nz, nw, nh) = noise != null && Rgba(noise, FacadeTex) is var (n, a, b) ? (n, a, b) : (null, 0, 0);
+        bool srgb = scan.SRGB;
+        var second = HueShift(tint, hue2);
+        var rgba = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float t = src[(y * w + x) * 4 + channel] / 255f;
+                if (srgb && channel < 3) t = Linear(t);
+                float mix = (nz != null ? nz[((y * nh / h) * nw + x * nw / w) * 4 + 1] / 255f : 0.5f) + 0.3f;
+                float[] c = [tint[0] * t * (1 - mix) + second[0] * mix, tint[1] * t * (1 - mix) + second[1] * mix, tint[2] * t * (1 - mix) + second[2] * mix];
+                c = HueShift(c, hue);
+                float lum = c[0] * 0.3f + c[1] * 0.59f + c[2] * 0.11f;
+                float ao = Math.Clamp(t / 0.7f, 0, 1);
+                if (invertAo) ao = 1 - ao;
+                ao = ao <= 0 ? 0 : MathF.Pow(ao, aoPower);
+                for (int k = 0; k < 3; k++)
+                    rgba[(y * w + x) * 4 + k] = (byte)Math.Round(Srgb(Math.Clamp((lum + (c[k] - lum) * saturation) * brightness * ao, 0, 1)) * 255);
+                rgba[(y * w + x) * 4 + 3] = 255;
+            }
+        return (rgba, w, h);
     }
 }

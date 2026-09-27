@@ -26,13 +26,14 @@ export class Corridors {
     return this.segs.length === 0;
   }
 
-  /** A run of road-surface points (world space) to keep clear, `half` m either side. */
-  add(points: THREE.Vector3[], half: number): void {
+  /** A run of road-surface points (world space) to keep clear, `half` m either side (or per point). */
+  add(points: THREE.Vector3[], halfWidth: number | number[]): void {
     for (let i = 0; i + 1 < points.length; i++) {
       const a = points[i];
       const b = points[i + 1];
       const len = Math.hypot(b.x - a.x, b.z - a.z);
       if (len < 0.01) continue;
+      const half = typeof halfWidth === 'number' ? halfWidth : Math.max(halfWidth[i], halfWidth[i + 1]);
       const r = half + JOINT;
       this.segs.push({
         ax: a.x, ay: a.y, az: a.z, by: b.y,

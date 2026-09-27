@@ -268,6 +268,10 @@ static class MapWriter
                 if (!inside(at.X, at.Z)) { clipped[ei] = true; clippedEntities++; continue; }
             }
             bool detail = isProp || radius < DetailRadius;
+            // The road graph comes from the drivable models only: a map's distant stand-ins (kept above when
+            // nothing refers to them) carry the same road texture over whole districts of ground
+            var lodLevel = e.CEntityDef.lodLevel;
+            bool distant = lodLevel is rage__eLodType.LODTYPES_DEPTH_LOD or rage__eLodType.LODTYPES_DEPTH_SLOD1 or rage__eLodType.LODTYPES_DEPTH_SLOD2 or rage__eLodType.LODTYPES_DEPTH_SLOD3 or rage__eLodType.LODTYPES_DEPTH_SLOD4;
             entMin[ei] = new Vector3(float.MaxValue); entMax[ei] = new Vector3(float.MinValue);
             if (!isProp && radius >= 1.5f) entVox[ei] = [];
             var boneM = BoneMatrices(d);
@@ -282,7 +286,7 @@ static class MapWriter
                     var mat = MaterialFor(g.Shader, materials);
                     bool water = mat.Shader.StartsWith("water") || (mat.Diffuse != null && waterRe.IsMatch(mat.Diffuse));
                     if (water && dropWater) continue;
-                    bool roadSurface = roadTex != null && mat.Diffuse != null && roadTex.IsMatch(mat.Diffuse);
+                    bool roadSurface = !distant && roadTex != null && mat.Diffuse != null && roadTex.IsMatch(mat.Diffuse);
                     var info = vd.Info;
                     bool has(int c) => ((info.Flags >> c) & 1) != 0;
                     var pos = new Vector3[vd.VertexCount];
