@@ -375,7 +375,7 @@ export class Islands {
     const corridors = new Corridors();
     if (maps.length > 1) {
       const links = planLinks(plans, (x, z) => occ.at(x, z), 2, design?.links);
-      bridges = await BridgeNetwork.load(world, plans, links);
+      bridges = await BridgeNetwork.load(world, plans, links, (x, z) => occ.at(x, z));
       for (const b of bridges.bridges) {
         const ga = plans[b.plan.a].base + b.plan.na;
         const gb = plans[b.plan.b].base + b.plan.nb;

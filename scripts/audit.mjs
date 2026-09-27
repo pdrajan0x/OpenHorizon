@@ -72,6 +72,11 @@ try {
     return cities ? out.filter((p) => p.why !== 'bridge end') : out;
   }, { GRID, only: process.env.PLACES, cities: process.env.CITIES, bridgesOnly: !!process.env.BRIDGES, ALONG });
   console.log(`${places.length} places to audit`);
+  // The bridges' centrelines, for telling their problems from the cities' (scripts/bridge-audit.mjs)
+  const bridges = await page.evaluate(() => (window.__debug.map.bridges?.bridges ?? []).map((b) => ({
+    ends: (b.ends ?? []).map((p) => [p.x, p.y, p.z]), nodes: b.nodes.map((p) => [p.x, p.y, p.z]), halfWidths: b.halfWidths,
+  })));
+  fs.writeFileSync(`${OUT}/bridges.json`, JSON.stringify(bridges));
 
   for (const [k, p] of places.entries()) {
     await page.evaluate(({ x, z }) => window.__audit.goTo(x, z), p);

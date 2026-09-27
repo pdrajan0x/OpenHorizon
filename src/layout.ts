@@ -51,17 +51,17 @@ const SHI = 'shibuya';
 /** The world the game builds (scripts/layout-variants.mjs tries others). */
 export const WORLD: Design = {
   at: {
-    [T12]: [0, 0], [LC]: [8.1, -4.5], [CHI]: [9.5, 2.0], [UG]: [-4.0, -8.9], [RIV]: [-7.7, -1.0], [SHI]: [-6.7, 3.6],
+    [T12]: [0, 0], [LC]: [8.1, -4.5], [CHI]: [9.5, 2.0], [UG]: [-4.0, -8.9], [RIV]: [-7.7, -1.0], [SHI]: [-8.2, -3.0],
     [TSU]: [1.2, 8.2], [AK]: [5.0, 7.5], [T10]: [-8.5, -8.0],
   },
   // rank: 0 the spokes to Town 12, 1 round the rim (a lower rank is built first where two would cross)
   links: [
-    [T12, LC, 0], [T12, CHI, 0], [T12, UG, 0], [T12, RIV, 0], [T12, SHI, 0], [T12, TSU, 0],
-    [LC, CHI, 1], [CHI, AK, 1], [AK, TSU, 1], [SHI, RIV, 1], [RIV, T10, 1], [T10, UG, 1],
+    [T12, LC, 0], [T12, CHI, 0], [T12, UG, 0], [T12, RIV, 0], [T12, TSU, 0],
+    [LC, CHI, 1], [CHI, AK, 1], [AK, TSU, 1], [UG, T10, 1], [T10, SHI, 1], [SHI, RIV, 1],
   ],
   fixed: {
     [T12]: [-600, 500], [LC]: [41200, -3000], [CHI]: [6300, 1100], [UG]: [-5800, -5700], [RIV]: [-7600, 1000],
-    [SHI]: [-5700, 1800], [TSU]: [1300, 8500], [AK]: [7000, 6800], [T10]: [-8200, -4900],
+    [SHI]: [-8200, -3000], [TSU]: [1300, 8500], [AK]: [7000, 6800], [T10]: [-8200, -4900],
   },
   nearLinks: false,
 };

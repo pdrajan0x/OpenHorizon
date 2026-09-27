@@ -15,7 +15,7 @@
 // swing in a gentle S, so they run a little longer.
 globalThis.location = { search: '' }; // src/quality.ts reads it on import
 const THREE = await import('three');
-const { planLinks } = await import('../src/bridges.ts');
+const { planLinks, layBridges } = await import('../src/bridges.ts');
 const { worldLayout, WORLD } = await import('../src/layout.ts');
 const { execFileSync } = await import('node:child_process');
 const fs = await import('node:fs');
@@ -28,7 +28,15 @@ const PACK_CELL = 100;
 const T12 = 'carla-town12', T10 = 'carla-town10', CHI = 'chicago', LC = 'lordcity', UG = 'ugase-city';
 const RIV = 'french-riviera', TSU = 'tsukuba', AK = 'akina', SHI = 'shibuya';
 const VARIANTS = {
-  current: { title: 'Now: three regions in a row', ...WORLD },
+  current: { title: 'Now: the hub (src/layout.ts)', ...WORLD },
+  rows: {
+    title: 'Before: three regions in a row',
+    at: { [T12]: [0, -20], [T10]: [-2, -13.6], [CHI]: [0, -6], [RIV]: [-4.5, 4], [LC]: [3.2, 3.3], [UG]: [-4.5, 10.6], [AK]: [3.5, 7.3], [TSU]: [3.2, 11.3], [SHI]: [-1.2, 11] },
+    links: [
+      [T12, CHI, 0], [T12, T10, 0], [T10, CHI, 0], [CHI, RIV, 1], [CHI, LC, 1], [RIV, LC, 1], [RIV, UG, 1],
+      [LC, AK, 0], [LC, UG, 0], [UG, SHI, 0], [AK, TSU, 0], [TSU, SHI, 0],
+    ],
+  },
   hub: {
     title: 'Hub: Town 12 in the middle, every city around it', optimise: true,
     at: { [T12]: [0, 0], [LC]: [8.1, -4.5], [CHI]: [9.5, 2.0], [UG]: [-4.0, -8.9], [RIV]: [-7.7, -1.0], [SHI]: [-6.7, 3.6], [TSU]: [1.2, 8.2], [AK]: [5.0, 7.5], [T10]: [-8.5, -8.0] },
@@ -199,9 +207,10 @@ for (const c of cities) {
     if (sd > EXIT_SHORE) return;
     const k = `${Math.floor(x / EXIT_CELL)},${Math.floor(z / EXIT_CELL)}`;
     const e = cells.get(k);
-    if (!e || sd < e.sd) cells.set(k, { x, z, sd });
+    if (!e || sd < e.sd) cells.set(k, { x, z, y: y + c.dy, sd });
   });
   c.exits = [...cells.values()];
+  c.topsH = c.tops ? new Int16Array(Uint8Array.from(Buffer.from(c.tops.h, 'base64')).buffer) : null;
   // Land for the sea-gap test: the mask grown by SEA_GAP, and the mask's rim
   const R = Math.ceil(SEA_GAP / PACK_CELL);
   const mask = masks[cities.indexOf(c)];
@@ -229,6 +238,22 @@ const onLand = (c, ox, oz, x, z) => {
   const j = Math.floor((z - oz) / PACK_CELL) - c.grown.j0;
   return i >= 0 && j >= 0 && i < c.grown.ni && j < c.grown.nj && c.grown.land[i * c.grown.nj + j] === 1;
 };
+
+/** The ground on city c at world (x, z), its frame at (ox, oz): the lowest tallest-thing height in the 20 m
+ * cells round it (as src/bridges.ts groundAt), −∞ where unknown. */
+function groundOn(c, ox, oz, x, z) {
+  const t = c.tops;
+  if (!t || !c.topsH) return -Infinity;
+  let low = Infinity;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    const i = Math.floor((x + a * 20 - ox - t.x0) / t.cell);
+    const j = Math.floor((z + b * 20 - oz - t.z0) / t.cell);
+    const v = i < 0 || j < 0 || i >= t.nx || j >= t.nz ? -32768 : c.topsH[i * t.nz + j];
+    if (v === -32768) return -Infinity;
+    low = Math.min(low, v + c.dy);
+  }
+  return low;
+}
 
 function segmentsCross(a, b, c, d) {
   const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
@@ -274,7 +299,7 @@ function optimise(ks, off, links) {
           let c = Math.hypot(dx, dz) + pa + 3 * eb.sd + 2 * Math.abs(alongX ? dz : dx);
           if (c >= best) continue;
           if (ub.some((u) => Math.hypot(u[0] - qx, u[1] - qz) < spreadB)) c += 2500;
-          if (c < best) { best = c; pick = [[px, pz], [qx, qz]]; }
+          if (c < best) { best = c; pick = [[px, pz], [qx, qz], Math.max(ea.y, eb.y)]; }
         }
       }
       if (!pick) { total += 1e6; continue; }
@@ -288,8 +313,10 @@ function optimise(ks, off, links) {
         const z = pick[0][1] + ((pick[1][1] - pick[0][1]) * s) / len;
         for (const k of ks) {
           if (!onLand(cities[k], ...o.get(k), x, z)) continue;
-          // A third city in the way: no; its own ends' land: a viaduct, costing as the planner counts it
-          total += k !== a && k !== b ? 3000 : 300;
+          // A third city in the way: no; its own ends' land: a viaduct, costing as the planner counts it,
+          // and far more where that land rises above both ends (the deck would climb over a hill)
+          if (k !== a && k !== b) { total += 3000; continue; }
+          total += 300 + 200 * Math.max(0, groundOn(cities[k], ...o.get(k), x, z) - pick[2] - 3);
         }
       }
       for (const s of segs) if (segmentsCross(s[0], s[1], pick[0], pick[1])) total += 8000;
@@ -451,6 +478,21 @@ function run(key, v) {
   const plannerLandAt = (x, z) => { const k = landAt(x, z); return k < 0 ? -1 : slot.get(k); };
   const t0 = Date.now();
   const links = planLinks(plans, plannerLandAt, 2, designed.map((l) => ({ ...l, a: slot.get(l.a), b: slot.get(l.b) })));
+  // The decks as the game lays them: curved, with their profiles
+  const decks = layBridges(plans, links, plannerLandAt);
+  if (process.env.PROFILE) {
+    for (const d of decks) {
+      const names = `${cities[which[d.plan.a]].name} ↔ ${cities[which[d.plan.b]].name}`;
+      if (!names.includes(process.env.PROFILE)) continue;
+      console.log(names);
+      for (let i = 0; i < d.frames.length; i += 12) {
+        const f = d.frames[i];
+        const k = plannerLandAt(f.p.x, f.p.z);
+        const top = k >= 0 ? plans[k].top?.(f.p.x, f.p.z) : null;
+        console.log(`  s ${f.s.toFixed(0).padStart(5)}  y ${f.p.y.toFixed(1).padStart(6)}  ${k >= 0 ? cities[which[k]].name : 'sea'}  top ${top?.toFixed(1) ?? '–'}`);
+      }
+    }
+  }
   const planMs = Date.now() - t0;
 
   // ── How well it's connected ──
@@ -464,7 +506,12 @@ function run(key, v) {
       const t = s / l.length;
       if (plannerLandAt(p.x + (q.x - p.x) * t, p.z + (q.z - p.z) * t) >= 0) land += 20;
     }
-    return { a: l.a, b: l.b, p, q, length: l.length, land };
+    const d = decks[links.indexOf(l)];
+    const frames = d.frames;
+    return {
+      a: l.a, b: l.b, p, q, length: frames[frames.length - 1].s, land,
+      curve: frames.map((f) => [f.p.x, f.p.z]), top: Math.max(...frames.map((f) => f.p.y)), bend: d.bend,
+    };
   });
   const degree = new Array(n).fill(0);
   for (const b of bridges) { degree[b.a]++; degree[b.b]++; }
@@ -546,7 +593,12 @@ function run(key, v) {
   const name = (i) => cities[which[i]].name;
   const stats = {
     key, title: v.title, planMs, connected,
-    bridges: bridges.map((b) => ({ a: name(b.a), b: name(b.b), km: +(b.length / 1000).toFixed(2), landKm: +(b.land / 1000).toFixed(2) })),
+    // Each city's frame offset (m), to put a settled layout into src/layout.ts as `fixed`
+    offsets: Object.fromEntries(which.map((k) => [cities[k].id, [offsets[k].x, offsets[k].z]])),
+    bridges: bridges.map((b) => ({
+      a: name(b.a), b: name(b.b), km: +(b.length / 1000).toFixed(2), landKm: +(b.land / 1000).toFixed(2),
+      bend: `${b.bend.shape} ${b.bend.amp.toFixed(0)} m`, topM: +b.top.toFixed(1),
+    })),
     bridgeKm: bridges.reduce((s, b) => s + b.length, 0) / 1000,
     longest: Math.max(...bridges.map((b) => b.length)) / 1000,
     cities: plans.map((_, i) => ({ name: name(i), bridges: degree[i], exits: exits[i], avgDriveKm: +perCity[i].toFixed(1) })),
@@ -592,10 +644,12 @@ function draw(key, v, stats, which, offsets, plans, bridges) {
   for (const b of bridges) {
     const [x1, y1] = px(b.p.x, b.p.z);
     const [x2, y2] = px(b.q.x, b.q.z);
-    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#0a1f2e" stroke-width="8" stroke-linecap="round"/>`;
-    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#ffb020" stroke-width="4" stroke-linecap="round"/>`;
+    const d = 'M' + b.curve.filter((_, i) => i % 5 === 0 || i === b.curve.length - 1).map(([x, z]) => px(x, z).join(',')).join('L');
+    svg += `<path d="${d}" stroke="#0a1f2e" stroke-width="8" stroke-linecap="round" fill="none"/>`;
+    svg += `<path d="${d}" stroke="#ffb020" stroke-width="4" stroke-linecap="round" fill="none"/>`;
     svg += `<circle cx="${x1}" cy="${y1}" r="4" fill="#fff"/><circle cx="${x2}" cy="${y2}" r="4" fill="#fff"/>`;
-    const [mx, my] = px((b.p.x + b.q.x) / 2, (b.p.z + b.q.z) / 2);
+    const mid = b.curve[Math.floor(b.curve.length / 2)];
+    const [mx, my] = px(mid[0], mid[1]);
     svg += `<text x="${mx}" y="${+my - 7}" fill="#ffd27a" font-size="13" font-weight="bold" text-anchor="middle" stroke="#0a1f2e" stroke-width="3" paint-order="stroke">${(b.length / 1000).toFixed(1)} km</text>`;
   }
   which.forEach((k, i) => {
@@ -658,7 +712,7 @@ for (const [key, v] of Object.entries(VARIANTS)) {
   console.log(`${key}: ${s.bridges.length} bridges ${s.bridgeKm.toFixed(1)} km, longest ${s.longest.toFixed(1)}, cuts ${s.cuts.length}, `
     + `avg drive ${s.avgDriveKm.toFixed(1)} km ×${s.avgDetour.toFixed(2)}, single-bridge cities ${s.cities.filter((c) => c.bridges < 2).map((c) => c.name).join(', ') || 'none'}, `
     + `one-exit cities ${s.cities.filter((c) => c.exits < 2).map((c) => c.name).join(', ') || 'none'} (${s.planMs} ms)`);
-  for (const b of s.bridges) console.log(`   ${b.a} ↔ ${b.b}: ${b.km} km (${b.landKm} over land)`);
+  for (const b of s.bridges) console.log(`   ${b.a} ↔ ${b.b}: ${b.km} km (${b.landKm} over land), ${b.bend}, top ${b.topM} m`);
 }
 fs.writeFileSync(`${OUT}/stats.json`, JSON.stringify(all, null, 1));
 if (!pick.length) {
