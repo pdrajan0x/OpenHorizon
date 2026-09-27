@@ -428,6 +428,7 @@ export class GameMap {
     const buf = await download(`${this.base}/cells/${c.id}.bin`);
     if (!buf) return;
     const group = await this.parseCell(buf, false);
+    group.name = `cell ${c.id}`;
     if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
     this.meshes.set(c.id, group);
     this.root.add(group);
@@ -459,6 +460,7 @@ export class GameMap {
       return;
     }
     const group = await this.parseCell(buf, true);
+    group.name = `far cell ${c.id}`;
     if (this.far.get(c.id) !== 'loading') return;
     const full = this.meshes.get(c.id);
     group.visible = !full || full === 'loading';
@@ -514,6 +516,9 @@ export class GameMap {
       // null: an old map without structure/detail tags. Far cells are never culled (already simplified).
       mesh.userData.detail = far ? false : (b.detail ?? null);
       const m = this.manifest.materials[b.material];
+      // Names for debugging and the geometry audit: what it is and its texture
+      mesh.name = `${m.shader}:${m.diffuse ?? 'untextured'}`;
+      mesh.userData.surface = { mask: m.mask, blend: m.blend, shader: m.shader };
       if (m.blend) mesh.renderOrder = 1;
       // Solid surfaces cast and take the sun's shadows; the far skyline is beyond the shadow range
       const solid = material instanceof THREE.MeshStandardMaterial && !m.blend && !material.transparent;

@@ -4,11 +4,11 @@
 # (FORCE=1 re-converts cars and maps). Mods are for local play only and are never committed.
 #
 #   bash scripts/setup.sh            # everything
-#   STEPS="maps" bash scripts/setup.sh   # only some steps: tools deps mods env cars audio props maps upscale index
+#   STEPS="maps" bash scripts/setup.sh   # only some steps: tools deps mods env cars audio props maps carla upscale index
 #   STEPS="maps" MAPS="miami monaco-gp" FORCE=1 bash scripts/setup.sh   # re-convert only these cities
 set -euo pipefail
 cd "$(dirname "$0")/.."
-STEPS="${STEPS:-tools deps mods env cars audio props maps upscale index}"
+STEPS="${STEPS:-tools deps mods env cars audio props maps carla upscale index}"
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 C="${C:-dotnet tools/gta5conv/bin/Release/net10.0/gta5conv.dll}" # C=... to use another build
 # Packs that ship models the city maps place but lack (vanilla names); earlier ones win where two overlap
@@ -102,7 +102,34 @@ if has maps; then
   done < <(node -e 'for (const m of require("./assets/maps.json")) console.log([m.id, m.mod, m.args.map((a) => `'"'"'${a}'"'"'`).join(" ")].join("\t"))')
 fi
 
-# 6. The cities' small textures remastered (Real-ESRGAN on the GPU, a few minutes a city): sharp facades up close
+# 6. CARLA's large towns (Town 12, Town 13; CC BY): the simulator's packaged build (16 GB download), its
+#    cooked Unreal levels converted by tools/ueconv, roads from their OpenDRIVE files
+if has carla; then
+  d=.mods/carla
+  mkdir -p "$d"
+  for f in CARLA_0.9.15.tar.gz AdditionalMaps_0.9.15.tar.gz; do
+    [[ -f $d/$f ]] || curl -fL -C - -o "$d/$f" "https://downloads.carlasim.com/Linux/$f"
+  done
+  if [[ ! -d $d/x/CarlaUE4/Content/Carla/Maps/Town13 ]]; then
+    mkdir -p "$d/x"
+    tar xzf "$d/CARLA_0.9.15.tar.gz" -C "$d/x" --wildcards 'CarlaUE4/Content/*' 'Engine/Content/*' 'CarlaUE4/Plugins/*/Content/*'
+    tar xzf "$d/AdditionalMaps_0.9.15.tar.gz" -C "$d/x"
+  fi
+  (cd tools/ueconv && dotnet build -c Release -v q -nologo)
+  for t in 12 13; do
+    id=carla-town$t
+    [[ -n ${MAPS:-} && " $MAPS " != *" $id "* ]] && continue
+    [[ -f public/mods/maps/$id/manifest.json && -z ${FORCE:-} ]] && { echo "= $id"; continue; }
+    echo "> $id"
+    tmp="public/mods/maps/.$id.tmp"
+    rm -rf "$tmp"
+    m="$d/x/CarlaUE4/Content/Carla/Maps/Town$t"
+    dotnet tools/ueconv/bin/Release/net10.0/ueconv.dll map "$d/x" "CarlaUE4/Content/Carla/Maps/Town$t/Town$t" "$tmp" --xodr "$m/OpenDrive/Town$t.xodr" | tail -1
+    rm -rf "public/mods/maps/$id" && mv "$tmp" "public/mods/maps/$id"
+  done
+fi
+
+# 7. The cities' small textures remastered (Real-ESRGAN on the GPU, a few minutes a city): sharp facades up close
 if has upscale; then
   # shellcheck disable=SC2046
   node scripts/upscale-textures.mjs $(node -e 'for (const m of require("./assets/maps.json")) if (!process.env.MAPS || ` ${process.env.MAPS} `.includes(` ${m.id} `)) console.log(m.id)')

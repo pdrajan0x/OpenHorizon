@@ -2,7 +2,8 @@
 // warm south, packed close so that every city's neighbours are about CHANNEL m of sea away and no drive
 // from one city to the next is a long empty crossing:
 //
-//   the Americas (west)      north: the West Coast (Bayview), the Great Lakes (Chicago)
+//   the Americas (west)      north: the West Coast (Bayview), the Great Lakes (Chicago), and inland the
+//                            two big towns of the plains (CARLA's Town 12, laid out like Amarillo, and Town 13)
 //                            south: Florida (Miami, Gostown)
 //   Europe and the Gulf      north: the Mediterranean (the Riviera, Monaco)
 //                            south: the desert highway running down to the Gulf, the palm islands off it
@@ -35,6 +36,8 @@ export interface LayoutLink {
 
 /** Rough centres in km, x north and z east. */
 const DESIGN: Record<string, [number, number]> = {
+  'carla-town12': [5, -34],
+  'carla-town13': [-8, -32],
   'nfsu2-bayview': [5, -22],
   chicago: [6, -14.5],
   miami: [-4, -19],
@@ -54,6 +57,7 @@ const DESIGN: Record<string, [number, number]> = {
 };
 /** [a, b, rank]: 0 within a region, 1 between regions */
 const LINKS: [string, string, number][] = [
+  ['carla-town12', 'nfsu2-bayview', 0], ['carla-town12', 'carla-town13', 0], ['carla-town13', 'miami', 1],
   ['nfsu2-bayview', 'chicago', 0], ['nfsu2-bayview', 'miami', 1], ['chicago', 'miami', 1], ['miami', 'gostown', 0],
   ['chicago', 'french-riviera', 1], ['french-riviera', 'monaco-gp', 0], ['monaco-gp', 'dubai-highway', 1],
   ['gostown', 'dubai-highway', 1], ['dubai-highway', 'dubai-islands', 0], ['dubai-islands', 'hong-kong', 1],

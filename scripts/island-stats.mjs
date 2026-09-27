@@ -56,7 +56,8 @@ for (const id of ids) {
   const ry = roads.nodes.map((n) => n[1]).sort((a, b) => a - b);
   const roadP1 = ry[Math.floor(ry.length * 0.01)] ?? groundP2;
   const water = manifest.stats?.water ?? null;
-  const dy = verticalOffset(water, groundP2, roadP1);
+  // A map built with no sea of its own (the Unreal towns, tools/ueconv) says where the sea should be
+  const dy = Number.isFinite(manifest.stats?.seaLevel) ? -manifest.stats.seaLevel : verticalOffset(water, groundP2, roadP1);
   const floor = -2 - dy; // land is anything up-facing above 2 m under the shared sea level
 
   // Pass 2: rasterize up-facing surfaces into the land mask, lowest surface per cell

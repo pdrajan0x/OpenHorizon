@@ -25,6 +25,8 @@ const INFO = {
   'french-riviera': { name: 'French Riviera', area: 'Mediterranean coast: seaside roads, villas and a hillside circuit' },
   gostown: { name: 'Gostown', area: 'tropical city: downtown, docks, tunnels and the bay bridge' },
   lordcity: { name: 'LordCity', area: 'forested hills: winding highways, tunnels and a cable-stayed bridge' },
+  'carla-town12': { name: 'Town 12', area: 'big American town: a high-rise downtown, apartment blocks, suburbs, highways and farmland' },
+  'carla-town13': { name: 'Town 13', area: 'big American town: downtown towers, old-town streets, suburbs, lakes and farmland' },
 };
 const FIRST = ['chicago', 'miami'];
 

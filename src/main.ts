@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import './style.css';
 import { Atmosphere, type TimeOfDay } from './atmosphere';
 import { CarAudio } from './audio';
+import { Audit } from './audit';
 import { ChaseCamera, type Clearance } from './camera';
 import { Car } from './car';
 import { SkidMarks, Sparks } from './effects';
@@ -49,6 +50,7 @@ declare global {
   interface Window {
     __game?: Record<string, number | boolean | string>;
     __debug?: Record<string, unknown>; // live game objects for test scripts, with ?debug
+    __audit?: { audit: Audit; run: () => number; goTo: (x: number, z: number) => Promise<void> }; // ?debug&audit
   }
 }
 
@@ -197,6 +199,16 @@ async function main(): Promise<void> {
     place(pose.position, pose.yaw);
     hud.banner('SPAWNED', map.islandAt(pose.position).info.name, 'info', 1.2);
   };
+
+  // ?debug&audit: the geometry and visibility audit (src/audit.ts); F9 shows its markers and issue list
+  if (params.has('debug') && params.has('audit')) {
+    const audit = new Audit(scene, map.root, world, () => map.roads.nodes, (p) => void teleport(new THREE.Vector2(p.x, p.z)));
+    window.__audit = {
+      audit,
+      run: () => audit.run(new THREE.Vector3().copy(player.body.translation() as THREE.Vector3Like)),
+      goTo: async (x: number, z: number) => { await teleport(new THREE.Vector2(x, z)); },
+    };
+  }
 
   // After a wreck: a new car on the nearest road
   const newCar = () => {

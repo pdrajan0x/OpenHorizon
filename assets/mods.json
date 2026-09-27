@@ -1449,5 +1449,20 @@
     "archiveBytes": 340596964,
     "downloaded": true,
     "fetchedBy": "manual (no direct link recorded)"
+  },
+  {
+    "id": "map-carla",
+    "category": "map",
+    "title": "CARLA Simulator 0.9.15: Town 12 and Town 13 (large maps)",
+    "author": "CARLA Team, Computer Vision Center (CVC)",
+    "pageUrl": "https://carla.org/2023/11/10/release-0.9.15/",
+    "fileUrl": "https://downloads.carlasim.com/Linux/CARLA_0.9.15.tar.gz",
+    "extraFiles": [
+      "https://downloads.carlasim.com/Linux/AdditionalMaps_0.9.15.tar.gz"
+    ],
+    "format": "Unreal Engine 4.26 packaged build (loose cooked .uasset/.umap), tar.gz; OpenDRIVE road networks",
+    "notes": "CC BY assets. Two 10x10 km large maps (36 and 48 tiles of 2 km): high-rise downtowns, apartment districts, suburbs, highways, farmland. Converted with tools/ueconv (CUE4Parse), roads from the .xodr files. Not fetched by fetch-mods.mjs (16 GB): see scripts/setup.sh.",
+    "archiveBytes": 15800000000,
+    "downloaded": true
   }
 ]

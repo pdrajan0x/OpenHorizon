@@ -64,6 +64,7 @@ rights holders).
 - [Akina [Add-On SP] (Initial D)](https://www.gta5-mods.com/maps/initiald-zero-akina) by AnLan (conversion); model from Assetto Corsa, original author unknown
 - [Tsukuba Fruit Line [Add-On SP / FiveM]](https://www.gta5-mods.com/maps/tsukuba-fruit-line-add-on-sp-fivem) by AnLan (conversion); model from Initial D Zero (Assetto Corsa)
 - [LordCity_GTA5 [Add-On]](https://www.gta5-mods.com/maps/lordcity_gta5) by jin007
+- [CARLA Simulator](https://carla.org) Town 12 and Town 13 (0.9.15) by the CARLA Team, Computer Vision Center (CVC) at the Universitat Autònoma de Barcelona; CARLA's assets are licensed [CC BY](https://github.com/carla-simulator/carla#licenses) (converted by `tools/ueconv`)
 
 ## Street props and trees
 
@@ -121,3 +122,4 @@ rights holders).
 ## Tools
 
 - [CodeWalker](https://github.com/dexyfex/CodeWalker) by dexyfex: GTA V file formats (used by `tools/gta5conv`)
+- [CUE4Parse](https://github.com/FabianFG/CUE4Parse) by FabianFG and contributors (Apache-2.0): Unreal Engine cooked assets (used by `tools/ueconv`)
