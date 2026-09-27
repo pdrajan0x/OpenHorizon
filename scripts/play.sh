@@ -10,7 +10,8 @@ cd "$(dirname "$0")/.."
 
 PORT=5173
 if [[ "${1:-}" == "--build" ]]; then
-  npx vite build --outDir dist-play --emptyOutDir >/dev/null
+  LINK_MODS=1 npx vite build --outDir dist-play --emptyOutDir >/dev/null
+  ln -sfn "$PWD/public/mods" dist-play/mods
   npx vite preview --outDir dist-play --port "$PORT" --strictPort >/dev/null &
 else
   npx vite --port "$PORT" --strictPort >/dev/null &

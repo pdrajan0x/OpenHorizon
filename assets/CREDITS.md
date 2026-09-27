@@ -63,6 +63,7 @@ rights holders).
 - [Google Maps Zagreb V (textured T_1.0)](https://www.gta5-mods.com/maps/google-maps-zagreb-v) by EncryptedReality
 - [Akina [Add-On SP] (Initial D)](https://www.gta5-mods.com/maps/initiald-zero-akina) by AnLan (conversion); model from Assetto Corsa, original author unknown
 - [Tsukuba Fruit Line [Add-On SP / FiveM]](https://www.gta5-mods.com/maps/tsukuba-fruit-line-add-on-sp-fivem) by AnLan (conversion); model from Initial D Zero (Assetto Corsa)
+- [LordCity_GTA5 [Add-On]](https://www.gta5-mods.com/maps/lordcity_gta5) by jin007
 
 ## Street props and trees
 
@@ -84,6 +85,15 @@ rights holders).
 - [Poly Haven shrubs + planter boxes](https://polyhaven.com/models) by Poly Haven
 - [Poly Haven Hidden Alley facades](https://polyhaven.com/models) by Poly Haven
 - [Poly Haven street furniture](https://polyhaven.com/models) by Poly Haven
+- [Old-gen palms tree converted](https://www.gta5-mods.com/misc/old-gen-palms-tree-converted) by Andrey_gta5
+- [Old-Gen Palm Trees (FIXED)](https://www.gta5-mods.com/misc/old-gen-palm-trees-fixed) by ImPedor
+- [GTA V Real Palm Trees](https://www.gta5-mods.com/misc/real-palm-trees) by Alpha7ICE
+- [Dead Vegetation](https://www.gta5-mods.com/misc/dead-vegetation) by Larcius
+- [Grass V](https://www.gta5-mods.com/misc/grass-v-improved-models-textures-density-beta-oiv-foxy_oxy) by Foxy_Oxy
+- [Real California Architecture](https://www.gta5-mods.com/misc/real-freeway-signs) by _Vlad_
+- [Lighting Freeway Crash Barriers](https://www.gta5-mods.com/misc/lighting-freeway-barriers) by Venkey
+- [Modular Map Builder pack](https://www.gta5-mods.com/misc/simple-road-pack-v-0-1-alpha) by EncryptedReality
+- [Custom Props Add-On](https://www.gta5-mods.com/maps/custom-prop) by Shaezbreizh
 
 ## Coast, sky and bridges
 

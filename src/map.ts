@@ -161,6 +161,9 @@ export class GameMap {
     this.materials = manifest.materials.map(() => [null, null]);
     this.root.name = `map:${id}`;
     this.root.position.copy(offset);
+    // Static: its world matrix is worked out once (islands.ts), not every frame for every cell under it
+    this.root.matrixAutoUpdate = false;
+    this.root.updateMatrix();
     const s = manifest.cellSize;
     for (const c of manifest.cells) {
       if (!c.render) continue;
@@ -330,6 +333,7 @@ export class GameMap {
     if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
     this.meshes.set(c.id, group);
     this.root.add(group);
+    group.updateMatrixWorld(true);
     const far = this.far.get(c.id);
     if (far && far !== 'loading' && far !== 'none') far.visible = false;
   }
@@ -362,6 +366,7 @@ export class GameMap {
     group.visible = !full || full === 'loading';
     this.far.set(c.id, group);
     this.root.add(group);
+    group.updateMatrixWorld(true);
   }
 
   private dropFar(id: number): void {
@@ -415,7 +420,9 @@ export class GameMap {
       // Solid surfaces cast and take the sun's shadows; the far skyline is beyond the shadow range
       const solid = material instanceof THREE.MeshStandardMaterial && !m.blend && !material.transparent;
       mesh.castShadow = !far && solid;
-      mesh.receiveShadow = !far && material instanceof THREE.MeshStandardMaterial;
+      // Far cells too, though beyond the shadows' reach: a material shared by meshes that differ here
+      // makes the renderer switch shader programs on almost every draw
+      mesh.receiveShadow = material instanceof THREE.MeshStandardMaterial;
       if (material.userData.shadowProxy) {
         // GTA's invisible shadow casters (tree canopies): only drawn into the shadow map
         if (far || !EFFECTS.shadows) continue;

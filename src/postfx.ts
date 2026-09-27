@@ -39,6 +39,9 @@ export class PostFX {
         distanceFalloff: 1.5,
         intensity: 2.5,
         gammaCorrection: false, // the composer's buffers are linear HDR; OutputPass does the sRGB step
+        // Off, and so no longer auto-detected: with any transparent material in the scene (glass, leaves)
+        // it walks the whole scene and renders it twice more every frame, a third of the frame's CPU
+        transparencyAware: false,
       });
       this.ao = ao;
       this.composer.addPass(ao);

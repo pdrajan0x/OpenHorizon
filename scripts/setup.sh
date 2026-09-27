@@ -10,7 +10,9 @@ cd "$(dirname "$0")/.."
 STEPS="${STEPS:-tools deps mods env cars audio props maps index}"
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 C="dotnet tools/gta5conv/bin/Release/net10.0/gta5conv.dll"
-PROPS=(--props .mods/props-traffic-nyc --props .mods/props-lights-festive --props .mods/props-trees-cherry)
+# Packs that ship models the city maps place but lack (vanilla names); earlier ones win where two overlap
+PROPS=(--props .mods/props-traffic-nyc --props .mods/props-lights-festive --props .mods/props-trees-cherry
+  --props .mods/veg-oldgen-palms --props .mods/veg-vanilla-overhaul --props .mods/road-real-california)
 
 # 1. System packages: Node, the .NET 10 SDK, bsdtar, ffmpeg
 if has tools; then

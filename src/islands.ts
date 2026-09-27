@@ -355,6 +355,10 @@ export class Islands {
     this.coast = coast;
     if (bridges) this.root.add(bridges.root);
     if (coast) this.root.add(coast.root);
+    // The world doesn't move: world matrices once, here, so the renderer's per-frame update of the scene
+    // doesn't recompute thousands of them. Cells that stream in later compute their own (map.ts).
+    this.root.traverse((o) => { o.matrixAutoUpdate = false; o.updateMatrix(); });
+    this.root.updateMatrixWorld(true);
     this.roads = new RoadGraph(roads);
     this.spawn = maps[0].spawn.clone();
   }
