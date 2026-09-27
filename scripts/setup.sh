@@ -4,35 +4,43 @@
 # (FORCE=1 re-converts cars and maps). Mods are for local play only and are never committed.
 #
 #   bash scripts/setup.sh            # everything
-#   STEPS="maps" bash scripts/setup.sh   # only some steps: tools deps mods env cars audio props maps index
+#   STEPS="maps" bash scripts/setup.sh   # only some steps: tools deps mods env cars audio props maps upscale index
+#   STEPS="maps" MAPS="miami monaco-gp" FORCE=1 bash scripts/setup.sh   # re-convert only these cities
 set -euo pipefail
 cd "$(dirname "$0")/.."
-STEPS="${STEPS:-tools deps mods env cars audio props maps index}"
+STEPS="${STEPS:-tools deps mods env cars audio props maps upscale index}"
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 C="dotnet tools/gta5conv/bin/Release/net10.0/gta5conv.dll"
 # Packs that ship models the city maps place but lack (vanilla names); earlier ones win where two overlap
 PROPS=(--props .mods/props-traffic-nyc --props .mods/props-lights-festive --props .mods/props-trees-cherry
   --props .mods/veg-oldgen-palms --props .mods/veg-vanilla-overhaul --props .mods/road-real-california)
 
-# 1. System packages: Node, the .NET 10 SDK, bsdtar, ffmpeg
+# 1. System packages: Node, the .NET 10 SDK, bsdtar, ffmpeg, ImageMagick; then the converter and Real-ESRGAN
 if has tools; then
   need=()
   command -v dotnet >/dev/null || need+=(dotnet)
   command -v bsdtar >/dev/null || need+=(bsdtar)
   command -v ffmpeg >/dev/null || need+=(ffmpeg)
   command -v node >/dev/null || need+=(node)
+  command -v magick >/dev/null || command -v convert >/dev/null || need+=(imagemagick)
   if ((${#need[@]})); then
     echo "installing: ${need[*]}"
     if command -v apt-get >/dev/null; then
-      sudo apt-get install -y dotnet-sdk-10.0 libarchive-tools ffmpeg nodejs npm
+      sudo apt-get install -y dotnet-sdk-10.0 libarchive-tools ffmpeg nodejs npm imagemagick
     elif command -v pacman >/dev/null; then
-      sudo pacman -S --needed --noconfirm dotnet-sdk libarchive ffmpeg nodejs npm
+      sudo pacman -S --needed --noconfirm dotnet-sdk libarchive ffmpeg nodejs npm imagemagick
     else
-      echo "install Node, the .NET 10 SDK, bsdtar and ffmpeg, then re-run" >&2; exit 1
+      echo "install Node, the .NET 10 SDK, bsdtar, ffmpeg and ImageMagick, then re-run" >&2; exit 1
     fi
   fi
   [[ -d tools/vendor/CodeWalker ]] || git clone --depth 1 https://github.com/dexyfex/CodeWalker.git tools/vendor/CodeWalker
   (cd tools/gta5conv && dotnet build -c Release -v q -nologo)
+  if [[ ! -x tools/vendor/realesrgan/realesrgan-ncnn-vulkan ]]; then
+    mkdir -p tools/vendor/realesrgan
+    curl -fL -o tools/vendor/realesrgan.zip https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip
+    bsdtar -xf tools/vendor/realesrgan.zip -C tools/vendor/realesrgan && rm tools/vendor/realesrgan.zip
+    chmod +x tools/vendor/realesrgan/realesrgan-ncnn-vulkan
+  fi
 fi
 
 has deps && npm ci
@@ -81,6 +89,7 @@ fi
 #    scripts/shape-coast.mjs, run once on the unclipped conversion
 if has maps; then
   while IFS=$'\t' read -r id mod args; do
+    [[ -n ${MAPS:-} && " $MAPS " != *" $id "* ]] && continue
     [[ -d .mods/$mod ]] || { echo "- $id: .mods/$mod missing"; continue; }
     [[ -f public/mods/maps/$id/manifest.json && -z ${FORCE:-} ]] && { echo "= $id"; continue; }
     unpack ".mods/$mod"
@@ -91,6 +100,12 @@ if has maps; then
     eval "$C map .mods/$mod $tmp $args --all-col ${PROPS[*]}" | tail -2
     rm -rf "public/mods/maps/$id" && mv "$tmp" "public/mods/maps/$id"
   done < <(node -e 'for (const m of require("./assets/maps.json")) console.log([m.id, m.mod, m.args.map((a) => `'"'"'${a}'"'"'`).join(" ")].join("\t"))')
+fi
+
+# 6. The cities' small textures remastered (Real-ESRGAN on the GPU, a few minutes a city): sharp facades up close
+if has upscale; then
+  # shellcheck disable=SC2046
+  node scripts/upscale-textures.mjs $(node -e 'for (const m of require("./assets/maps.json")) if (!process.env.MAPS || ` ${process.env.MAPS} `.includes(` ${m.id} `)) console.log(m.id)')
 fi
 
 # Island outlines and height maps (src/islands.ts lays the cities out and plans the bridges with them), then the index
