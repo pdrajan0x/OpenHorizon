@@ -1,11 +1,14 @@
 // Per-map data for placing a city as an island (src/islands.ts, src/coast.ts), from its collision:
-// the 2nd percentile of ground height, the vertical offset that puts it on the shared sea, and a coarse
-// land outline (coast.json schema) used until scripts/map-extras.mjs writes the finer coast.json.
+// the 2nd percentile of ground height, the vertical offset that puts it on the shared sea, a coarse
+// land outline (coast.json schema) used until scripts/map-extras.mjs writes the finer coast.json, and
+// `tops`: the highest collision (ground, hill or roof) per TOP_CELL m square, so bridges can be planned
+// to leave over open ground instead of cutting through a hill or a building.
 // Usage: node scripts/island-stats.mjs [id ...]   → public/mods/maps/<id>/island.json
 import fs from 'node:fs';
 import { cleanMask, traceLoops, verticalOffset } from '../src/outline.ts';
 
 const CELL = 20; // m per mask cell
+const TOP_CELL = 20; // m per cell of the height map
 const root = 'public/mods/maps';
 const ids = process.argv.slice(2).length ? process.argv.slice(2)
   : JSON.parse(fs.readFileSync(`${root}/index.json`, 'utf8')).map((i) => i.id);
@@ -95,6 +98,43 @@ for (const id of ids) {
       }
     }
   }
+  // Pass 3: the highest collision of any kind per cell (hills, walls and roofs), local frame
+  const tnx = Math.ceil((maxX - x0) / TOP_CELL) + 1;
+  const tnz = Math.ceil((maxZ - z0) / TOP_CELL) + 1;
+  const top = new Float32Array(tnx * tnz).fill(-Infinity);
+  const raise = (x, z, y) => {
+    const i = Math.floor((x - x0) / TOP_CELL);
+    const j = Math.floor((z - z0) / TOP_CELL);
+    if (i >= 0 && j >= 0 && i < tnx && j < tnz && y > top[i * tnz + j]) top[i * tnz + j] = y;
+  };
+  for (const [p, ix] of triangles(id)) {
+    for (let t = 0; t < ix.length; t += 3) {
+      const a = ix[t] * 3, b = ix[t + 1] * 3, c = ix[t + 2] * 3;
+      const ax = p[a], ay = p[a + 1], az = p[a + 2];
+      const ux = p[b] - ax, uy = p[b + 1] - ay, uz = p[b + 2] - az;
+      const wx = p[c] - ax, wy = p[c + 1] - ay, wz = p[c + 2] - az;
+      for (const [x, y, z] of [[ax, ay, az], [p[b], p[b + 1], p[b + 2]], [p[c], p[c + 1], p[c + 2]]]) raise(x, z, y);
+      // Big triangles (terrain): also every cell centre they cover
+      const span = Math.max(Math.abs(ux), Math.abs(uz), Math.abs(wx), Math.abs(wz), Math.abs(ux - wx), Math.abs(uz - wz));
+      if (span < TOP_CELL) continue;
+      const det = ux * wz - uz * wx;
+      if (Math.abs(det) < 1e-9) continue;
+      const i0 = Math.floor((Math.min(ax, ax + ux, ax + wx) - x0) / TOP_CELL), i1 = Math.floor((Math.max(ax, ax + ux, ax + wx) - x0) / TOP_CELL);
+      const j0 = Math.floor((Math.min(az, az + uz, az + wz) - z0) / TOP_CELL), j1 = Math.floor((Math.max(az, az + uz, az + wz) - z0) / TOP_CELL);
+      for (let i = i0; i <= i1; i++) {
+        for (let j = j0; j <= j1; j++) {
+          const px = x0 + (i + 0.5) * TOP_CELL - ax, pz = z0 + (j + 0.5) * TOP_CELL - az;
+          const s2 = (px * wz - pz * wx) / det;
+          const r = (ux * pz - uz * px) / det;
+          if (s2 >= 0 && r >= 0 && s2 + r <= 1) raise(px + ax, pz + az, ay + s2 * uy + r * wy);
+        }
+      }
+    }
+  }
+  // Metres (rounded up), −32768 where there's nothing, as base64 Int16
+  const topM = Int16Array.from(top, (v) => (Number.isFinite(v) ? Math.max(-32767, Math.min(32767, Math.ceil(v))) : -32768));
+  const tops = { cell: TOP_CELL, x0, z0, nx: tnx, nz: tnz, h: Buffer.from(topM.buffer).toString('base64') };
+
   const mask = { nx, nz, x0, z0, cell: CELL, land, height };
   cleanMask(mask);
   const loops = traceLoops(mask).filter((l) => l.points.length >= 6);
@@ -103,6 +143,7 @@ for (const id of ids) {
     water: water ? { minY: water.minY } : null,
     landBounds: [minX, minZ, maxX, maxZ].map((v) => +v.toFixed(1)),
     loops: loops.map((l) => ({ outer: l.outer, points: l.points.map(([x, z, y]) => [+x.toFixed(1), +z.toFixed(1), y]) })),
+    tops,
   };
   fs.writeFileSync(`${root}/${id}/island.json`, JSON.stringify(out));
   const land0 = land.reduce((s, v) => s + v, 0) * CELL * CELL / 1e6;

@@ -20,6 +20,8 @@ const INFO = {
   'dubai-highway': { name: 'Dubai Highway', area: 'desert highway: a 10 km straight lined with towers' },
   'dubai-islands': { name: 'Dubai Islands', area: 'coastal resort: palm island, marina and causeways' },
   'nfsu2-bayview': { name: 'Bayview', area: 'tuner city: downtown, beach, airport and hills' },
+  tsukuba: { name: 'Mt. Tsukuba', area: 'mountain forest: a touge climbing through cedar woods' },
+  akina: { name: 'Mt. Akina', area: 'mountain pass: the Initial D hairpins of Mt. Haruna' },
 };
 const FIRST = ['chicago', 'miami'];
 

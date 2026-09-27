@@ -1,13 +1,14 @@
 // The full-screen map (M): every island's streets on the open sea, north up, with the events, rivals,
 // the GPS route and the player. The game pauses while it's open; M or Escape goes back to driving.
-// Mouse wheel or +/- zooms, dragging or the arrow keys pan. Click any city label to jump to it.
+// Mouse wheel or +/- zooms, dragging or the arrow keys pan. Click any city label to jump to it; click
+// anywhere else to set a GPS waypoint, right-click or Delete to clear it. The view stays where you
+// left it between visits (F fits everything again).
 import * as THREE from 'three';
 import type { Islands } from './islands';
 import { MapTiles, type MapExtras } from './minimap';
 
 const MIN_SCALE = 0.001; // px per m: the whole archipelago
 const MAX_SCALE = 1.2; // px per m: a few blocks
-const LAND_WIDTH = 140; // m: streets drawn this wide in land colour read as the island under them
 const LEGEND: [string, string][] = [['race', '#00e5ff'], ['road rage', '#ff2030'], ['stunt run', '#ffd166']];
 
 export class WorldMap {
@@ -16,6 +17,8 @@ export class WorldMap {
   private readonly g: CanvasRenderingContext2D;
   private readonly centre = new THREE.Vector2(); // world (x north, z east) at the middle of the screen
   private scale = 0.025;
+  private fitted = false; // the first opening fits the whole world; later ones keep the last view
+  private waypoint: THREE.Vector2 | null = null;
   private drag: { x: number; y: number; moved: boolean } | null = null;
   private player = { x: 0, z: 0, heading: 0 };
   private extras: MapExtras | null = null;
@@ -23,7 +26,12 @@ export class WorldMap {
   private redraw = 0;
   private readonly labels: { name: string; x: number; z: number; box?: { x0: number; y0: number; x1: number; y1: number } }[];
 
-  constructor(private readonly islands: Islands, private readonly onToggle: (open: boolean) => void) {
+  constructor(
+    private readonly islands: Islands,
+    private readonly onToggle: (open: boolean) => void,
+    /** A GPS waypoint was set (world x, z) or cleared (null). */
+    private readonly onWaypoint: (at: THREE.Vector2 | null) => void = () => {},
+  ) {
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'worldmap';
     this.canvas.className = 'hidden';
@@ -55,6 +63,7 @@ export class WorldMap {
         else if (e.code === 'Equal' || e.code === 'NumpadAdd') this.zoom(1.4);
         else if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.zoom(1 / 1.4);
         else if (e.code === 'KeyF') this.fitAll();
+        else if (e.code === 'Delete' || e.code === 'Backspace') this.setWaypoint(null);
         else if (e.code.startsWith('Arrow')) this.pan(e.code);
         else return;
         e.stopImmediatePropagation();
@@ -67,7 +76,13 @@ export class WorldMap {
       this.zoom(e.deltaY < 0 ? 1.25 : 1 / 1.25, e.clientX, e.clientY);
     }, { passive: false });
 
+    this.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this.setWaypoint(null);
+    });
+
     this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
       this.drag = { x: e.clientX, y: e.clientY, moved: false };
       this.canvas.setPointerCapture(e.pointerId);
     });
@@ -87,16 +102,20 @@ export class WorldMap {
 
     this.canvas.addEventListener('pointerup', (e) => {
       if (this.drag && !this.drag.moved) {
-        // Clicked without dragging: check if clicked on any island label badge
+        // A click without dragging: a city label zooms to that city, the waypoint marker clears it,
+        // anywhere else sets the waypoint there
         const clickX = e.clientX;
         const clickY = e.clientY;
-        for (const l of this.labels) {
-          if (l.box && clickX >= l.box.x0 && clickX <= l.box.x1 && clickY >= l.box.y0 && clickY <= l.box.y1) {
-            this.centre.set(l.x, l.z);
-            this.scale = 0.15; // Zoom in to the selected island
-            this.draw();
-            break;
-          }
+        const label = this.labels.find((l) => l.box && clickX >= l.box.x0 && clickX <= l.box.x1 && clickY >= l.box.y0 && clickY <= l.box.y1);
+        if (label) {
+          this.centre.set(label.x, label.z);
+          this.scale = 0.15;
+          this.draw();
+        } else if (this.waypoint && Math.hypot(...this.toScreen(this.waypoint.x, this.waypoint.y).map((v, k) => v - [clickX, clickY][k])) < 14) {
+          this.setWaypoint(null);
+        } else {
+          const w = this.toWorld(clickX, clickY);
+          this.setWaypoint(w);
         }
       }
       this.drag = null;
@@ -118,10 +137,28 @@ export class WorldMap {
   toggle(): void {
     this.open = !this.open;
     this.canvas.classList.toggle('hidden', !this.open);
-    if (this.open) {
+    if (this.open && !this.fitted) {
+      this.fitted = true;
       this.fitAll();
-    }
+    } else if (this.open) this.draw();
     this.onToggle(this.open);
+  }
+
+  /** Show fresh extras now (e.g. the route to a waypoint just set) while the map is open. */
+  refresh(extras: MapExtras): void {
+    this.extras = extras;
+    if (this.open) this.draw();
+  }
+
+  /** The waypoint was reached: take the pin off the map. */
+  clearWaypoint(): void {
+    this.waypoint = null;
+  }
+
+  private setWaypoint(at: THREE.Vector2 | null): void {
+    this.waypoint = at;
+    this.onWaypoint(at);
+    this.draw();
   }
 
   /** Fit the entire archipelago of islands inside the screen viewport. */
@@ -164,6 +201,10 @@ export class WorldMap {
     this.draw();
   }
 
+  private toScreen(x: number, z: number): [number, number] {
+    return [innerWidth / 2 + (z - this.centre.y) * this.scale, innerHeight / 2 - (x - this.centre.x) * this.scale];
+  }
+
   private toWorld(sx: number, sy: number): THREE.Vector2 {
     return new THREE.Vector2(this.centre.x - (sy - innerHeight / 2) / this.scale, this.centre.y + (sx - innerWidth / 2) / this.scale);
   }
@@ -198,6 +239,20 @@ export class WorldMap {
     g.lineCap = 'round';
     g.lineJoin = 'round';
 
+    // Land: every island's outline, lakes cut out, under everything else
+    g.beginPath();
+    for (const { offset, loops } of this.islands.outlines) {
+      for (const l of loops) {
+        l.points.forEach(([x, z], i) => (i === 0 ? g.moveTo(x + offset.x, z + offset.z) : g.lineTo(x + offset.x, z + offset.z)));
+        g.closePath();
+      }
+    }
+    g.fillStyle = '#18332c';
+    g.fill('evenodd');
+    g.strokeStyle = '#2f5a4c';
+    g.lineWidth = 2 / this.scale;
+    g.stroke();
+
     // Visible world rectangle, for picking tiles
     const c0 = this.toWorld(0, h), c1 = this.toWorld(w, 0);
     this.tiles.draw(g, c0.x, c0.y, c1.x, c1.y, this.scale);
@@ -217,10 +272,6 @@ export class WorldMap {
         g.stroke();
       }
     };
-    // Island land mass faked from the streets, only for islands without map images
-    const landless = bare.filter((l) => !tiles.covers(nodes[l.a].x, nodes[l.a].z) && !tiles.covers(nodes[l.b].x, nodes[l.b].z));
-    strokeRoads(landless, () => LAND_WIDTH, '#16332d');
-    strokeRoads(landless, () => LAND_WIDTH * 0.65, '#234a3f');
     // Road asphalt and street outlines
     strokeRoads(bare, (lanes) => Math.max(2.8 / this.scale, 4.5 * Math.max(1, lanes)), '#3a4454');
     strokeRoads(bare, (lanes) => Math.max(1.8 / this.scale, 3.2 * Math.max(1, lanes)), tiles.any ? '#8894a6' : '#e0e6ed');
@@ -284,11 +335,30 @@ export class WorldMap {
       g.stroke();
     }
 
-    if (ex?.destination) {
+    if (ex?.destination && !this.waypoint) {
       const [sx, sy] = at(ex.destination.x, ex.destination.z);
       g.strokeStyle = '#ff2bd6';
       g.lineWidth = 3;
       g.strokeRect(sx - 8, sy - 8, 16, 16);
+    }
+    if (this.waypoint) {
+      // A map pin at the waypoint, on the road the route ends at
+      const pin = ex?.destination ?? new THREE.Vector3(this.waypoint.x, 0, this.waypoint.y);
+      const [sx, sy] = at(pin.x, pin.z);
+      g.beginPath();
+      g.moveTo(sx, sy);
+      g.bezierCurveTo(sx - 4, sy - 9, sx - 11, sy - 13, sx - 11, sy - 21);
+      g.arc(sx, sy - 21, 11, Math.PI, 0);
+      g.bezierCurveTo(sx + 11, sy - 13, sx + 4, sy - 9, sx, sy);
+      g.fillStyle = '#ff2bd6';
+      g.fill();
+      g.strokeStyle = '#2a0022';
+      g.lineWidth = 2;
+      g.stroke();
+      g.beginPath();
+      g.arc(sx, sy - 21, 4, 0, Math.PI * 2);
+      g.fillStyle = '#fff';
+      g.fill();
     }
 
     g.fillStyle = '#ff9a3c';
@@ -319,7 +389,7 @@ export class WorldMap {
     g.textAlign = 'left';
     g.font = '13px system-ui, sans-serif';
     g.fillStyle = 'rgba(232, 244, 255, 0.9)';
-    g.fillText('MAP — M / Esc back · Click city to focus · Wheel / +/- zoom · Drag / arrows pan · F fit all', 18, h - 20);
+    g.fillText('MAP — M / Esc back · Click a city to focus · Click the map to set GPS, right-click / Del to clear · Wheel / +/- zoom · Drag / arrows pan · F fit all', 18, h - 20);
 
     let lx = 18;
     for (const [label, colour] of LEGEND) {

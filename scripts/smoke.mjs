@@ -131,9 +131,26 @@ try {
   check('Road Rage runs with roaming rivals', rage.event === `${rageId}:live` && rage.rivals === 4 && rage.rivalAvgSpeed > 5,
     `event=${rage.event} rivals=${rage.rivals} avg ${(rage.rivalAvgSpeed * 3.6).toFixed(0)} km/h`);
 
-  // Part 4: flat out across the lot into the buildings beyond it
-  await page.goto(`${url}?traffic=0`);
+  // Part 4: flat out into the nearest wall. Turn the car to face a solid face 60–250 m off (whatever
+  // the map's spawn looks at), then hold W + boost
+  await page.goto(`${url}?traffic=0&debug`);
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1.5, null, { timeout: 90_000 });
+  const aimed = await page.evaluate(() => {
+    const { THREE, RAPIER, world } = window.__debug;
+    const car = window.__debug.player();
+    const p = car.body.translation();
+    let best = null;
+    for (let k = 0; k < 64; k++) {
+      const a = (k / 64) * Math.PI * 2;
+      const dir = { x: Math.cos(a), y: 0, z: Math.sin(a) };
+      const hit = world.castRayAndGetNormal(new RAPIER.Ray({ x: p.x, y: p.y + 0.8, z: p.z }, dir), 250, true, undefined, undefined, undefined, car.body);
+      if (!hit || hit.timeOfImpact < 60 || Math.abs(hit.normal.y) > 0.3) continue;
+      if (!best || hit.timeOfImpact < best.d) best = { d: hit.timeOfImpact, a };
+    }
+    if (!best) return null;
+    car.body.setRotation(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -best.a, 0)), true);
+    return best.d;
+  });
   let crashedAt = null;
   await page.keyboard.down('KeyW');
   await page.keyboard.down('ShiftLeft');
@@ -147,7 +164,8 @@ try {
   await page.keyboard.up('KeyW');
   await page.keyboard.up('ShiftLeft');
   if (crashedAt) await page.screenshot({ path: `${shots}/crash.png` });
-  check('a flat-out hit is a crash', crashedAt !== null, crashedAt ? `crashed at x=${crashedAt.x.toFixed(0)} z=${crashedAt.z.toFixed(0)}` : 'no crash in 25 s');
+  check('a flat-out hit is a crash', crashedAt !== null,
+    `${aimed ? `aimed at a wall ${aimed.toFixed(0)} m off` : 'no wall in reach'}; ${crashedAt ? `crashed at x=${crashedAt.x.toFixed(0)} z=${crashedAt.z.toFixed(0)}` : 'no crash in 25 s'}`);
   if (crashedAt) {
     await page.waitForFunction(() => !window.__game?.crashed || window.__game?.wrecked, null, { timeout: 60_000 });
     const after = await hold([], 0.3);

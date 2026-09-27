@@ -4,6 +4,7 @@
 // rivals, events and the GPS.
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
+import type { Corridors } from './corridors';
 import { EFFECTS } from './quality';
 
 const RENDER_RADIUS = 650; // m of city drawn around the camera (fog hides the edge)
@@ -140,7 +141,9 @@ export class GameMap {
   private readonly meshes = new Map<number, THREE.Group | 'loading'>();
   private readonly far = new Map<number, THREE.Group | 'loading' | 'none'>();
   private farState: 'unknown' | 'checking' | 'yes' | 'no' = 'unknown';
-  private readonly colliders = new Map<number, RAPIER.Collider | 'loading'>();
+  private readonly colliders = new Map<number, RAPIER.Collider | 'loading' | 'none'>();
+  /** Bridge approaches to keep clear of this map's geometry (islands.ts); set before cells load. */
+  corridors: Corridors | null = null;
 
   private constructor(
     readonly id: string,
@@ -281,7 +284,7 @@ export class GameMap {
         const col = this.colliders.get(c.id);
         if (!col && near < COLLISION_RADIUS) void this.loadCollision(c);
         else if (col && col !== 'loading' && near > COLLISION_RADIUS + 150) {
-          this.world.removeCollider(col, false);
+          if (col !== 'none') this.world.removeCollider(col, false);
           this.colliders.delete(c.id);
         }
       }
@@ -392,8 +395,10 @@ export class GameMap {
         geo.setAttribute('shade', new THREE.BufferAttribute(shade, 4, true));
       }
       offset += b.vertices * stride * 4;
-      const index = new Uint32Array(buf, offset, b.indices);
+      const raw = new Uint32Array(buf, offset, b.indices);
       offset += b.indices * 4;
+      const index = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset) : raw;
+      if (!index.length) continue;
       const ib = new THREE.InterleavedBuffer(interleaved, stride);
       geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
       geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(ib, 3, 3));
@@ -432,7 +437,12 @@ export class GameMap {
     const vertices = view.getUint32(0, true);
     const indices = view.getUint32(4, true);
     const pos = new Float32Array(buf, 8, vertices * 3);
-    const idx = new Uint32Array(buf, 8 + vertices * 12, indices);
+    const idx = this.corridors ? this.corridors.cut(pos, 3, new Uint32Array(buf, 8 + vertices * 12, indices), this.offset)
+      : new Uint32Array(buf, 8 + vertices * 12, indices);
+    if (!idx.length) {
+      this.colliders.set(c.id, 'none');
+      return;
+    }
     const desc = RAPIER.ColliderDesc.trimesh(pos, idx).setFriction(0.9).setCollisionGroups(STATIC_GROUPS)
       .setTranslation(this.offset.x, this.offset.y, this.offset.z);
     const collider = this.world.createCollider(desc);

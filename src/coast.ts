@@ -10,6 +10,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import type { Corridors } from './corridors';
 import { STATIC_GROUPS } from './map';
 import type { CoastLoop } from './outline';
 
@@ -62,6 +63,8 @@ function profile(kind: Kind, h: number, noise: (k: number) => number): Profile {
   return { pts, surf: ['rock', 'rock', 'rock', 'rock', 'rock', 'rock', 'rock', 'riprap'] };
 }
 
+const ORIGIN = { x: 0, y: 0, z: 0 };
+
 const hash = (x: number) => {
   const s = Math.sin(x * 127.1 + 311.7) * 43758.5453;
   return s - Math.floor(s);
@@ -77,6 +80,8 @@ export class Coast {
     islands: { loops: CoastLoop[]; offset: THREE.Vector3 }[],
     private readonly materials: Record<Surface, THREE.Material>,
     rockModels: { geometry: THREE.BufferGeometry; material: THREE.Material; size: number }[],
+    /** Bridge approaches: sea walls and rocks leave them clear. */
+    private readonly corridors: Corridors | null,
   ) {
     this.root.name = 'coast';
     let seed = 1;
@@ -91,7 +96,7 @@ export class Coast {
     }
   }
 
-  static async load(world: RAPIER.World, islands: { loops: CoastLoop[]; offset: THREE.Vector3 }[]): Promise<Coast> {
+  static async load(world: RAPIER.World, islands: { loops: CoastLoop[]; offset: THREE.Vector3 }[], corridors: Corridors | null = null): Promise<Coast> {
     const tex = new THREE.TextureLoader();
     const load = (name: string, kind: string, color: boolean) =>
       tex.loadAsync(`/mods/coast/${name}/${name}_${kind}_2k.jpg`).then((t) => {
@@ -120,7 +125,7 @@ export class Coast {
       const size = geometry.boundingBox!.getSize(new THREE.Vector3());
       return { geometry, material: mesh.material as THREE.Material, size: Math.max(size.x, size.z) };
     }).catch(() => null)))).filter((r): r is NonNullable<typeof r> => r !== null);
-    return new Coast(world, islands, materials, rockModels);
+    return new Coast(world, islands, materials, rockModels, corridors);
   }
 
   private buildLoop(
@@ -214,6 +219,9 @@ export class Coast {
     const group = new THREE.Group();
     const box = new THREE.Box3();
     for (const [surf, b] of bySurface) {
+      // The skirt dips under a bridge approach rather than showing through its deck
+      if (this.corridors) b.index = this.corridors.cut(b.pos, 3, b.index, ORIGIN, -0.4);
+      if (!b.index.length) continue;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
@@ -230,6 +238,7 @@ export class Coast {
       colPos.push(...b.pos);
       for (const i of geo.index!.array) colIdx.push(i + base);
     }
+    if (!colIdx.length) return;
     this.root.add(group);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     this.chunks.push({ mesh: group, center: sphere.center, radius: sphere.radius });
@@ -262,6 +271,7 @@ export class Coast {
       const y = kind === 'wall' ? -1.5 - (d - 2) * 0.35 : kind === 'cliff' ? -2.5 : -2;
       const x = pts[i][0] + normals[i][0] * d + offset.x;
       const z = pts[i][1] + normals[i][1] * d + offset.z;
+      if (this.corridors?.blocks(x, y + size / 2, z, size)) continue;
       q.setFromEuler(e.set((r(5) - 0.5) * 0.4, r(6) * Math.PI * 2, (r(7) - 0.5) * 0.4));
       m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(scale, scale * (0.8 + r(8) * 0.5), scale));
       let list = per.get(model);

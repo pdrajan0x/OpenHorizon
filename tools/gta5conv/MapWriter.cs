@@ -18,6 +18,11 @@
 //   --drop-water      leave out water surfaces (water shaders, textures named water/sea/ocean)
 //   --render-col <regex>  also collide with the render meshes of entities whose archetype name matches
 //                     (for mods whose buildings ship without collision)
+//   --clip <file.json>  keep only what lies inside these loops ({"loops": [{"points": [[x, z], …]}, …]}, game
+//                     frame, even-odd): a new coastline for a map whose land is a square block
+//                     (scripts/shape-coast.mjs). Smaller entities are kept or left out whole by where they
+//                     stand; bigger ones (ground, terrain) and the collision are trimmed triangle by triangle;
+//                     road nodes outside are dropped
 //
 // Cell .bin: u32 json length, JSON { batches: [{ material, vertices, indices, colors?, detail? }] }, padding
 // to 4 bytes, then per batch: f32 position×3, f32 normal×3, f32 uv×2 (+ u8 RGBA vertex colour when
@@ -62,6 +67,7 @@ static class MapWriter
         HashSet<int> roadMat = null;
         System.Text.RegularExpressions.Regex renderColRe = null;
         var renderCol = new List<Vector3>(); // render triangles that also collide (--render-col)
+        List<Vector2[]> clip = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--cell") cellSize = float.Parse(args[++i]);
@@ -74,7 +80,14 @@ static class MapWriter
             if (args[i] == "--road-tex") roadTex = new(args[++i], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (args[i] == "--road-mat") roadMat = args[++i].Split(',').Select(int.Parse).ToHashSet();
             if (args[i] == "--render-col") renderColRe = new(args[++i], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (args[i] == "--clip")
+                clip = JsonNode.Parse(File.ReadAllText(args[++i]))!["loops"]!.AsArray()
+                    .Select(l => l!["points"]!.AsArray().Select(p => new Vector2((float)p![0]!, (float)p[1]!)).ToArray()).ToList();
         }
+        // Inside the clip loops (even-odd over all of them), game frame
+        var clipper = clip != null ? new Clipper(clip) : null;
+        bool inside(float x, float z) => clipper == null || clipper.Inside(x, z);
+        int clippedEntities = 0;
         bool deriveRoads = roadCol != null || roadTex != null || roadMat != null;
         var roadTris = new List<Vector3>(); // road surface triangles for RoadDerive, game frame
         var waterRe = new System.Text.RegularExpressions.Regex(@"(^|_)(water|sea|ocean)(_|\d|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -201,6 +214,7 @@ static class MapWriter
         var entMin = new Vector3[placed.Count];
         var entMax = new Vector3[placed.Count];
         var entVox = new HashSet<long>[placed.Count]; // 8 m voxels of each building's solid surfaces
+        var clipped = new bool[placed.Count];
         for (int ei = 0; ei < placed.Count; ei++)
         {
             var (e, d) = placed[ei];
@@ -208,6 +222,13 @@ static class MapWriter
             bool isProp = props.Contains(e.CEntityDef.archetypeName);
             bool solid = renderColRe != null && renderColRe.IsMatch(JenkIndex.GetString(e.CEntityDef.archetypeName));
             float radius = d.BoundingSphereRadius * Math.Max(e.Scale.X, e.Scale.Z);
+            // A new coastline: buildings and props stay or go whole; ground and terrain are trimmed below
+            bool trim = clip != null && radius >= ClipWhole;
+            if (clip != null && !trim)
+            {
+                var at = toGame(e.Position);
+                if (!inside(at.X, at.Z)) { clipped[ei] = true; clippedEntities++; continue; }
+            }
             bool detail = isProp || radius < DetailRadius;
             entMin[ei] = new Vector3(float.MaxValue); entMax[ei] = new Vector3(float.MinValue);
             if (!isProp && radius >= 1.5f) entVox[ei] = [];
@@ -254,21 +275,29 @@ static class MapWriter
                                 _ => Vector2.Zero,
                             };
                     }
+                    // The triangles, less what a new coastline (--clip) leaves out
+                    IReadOnlyList<int> tri = idx.Take(Math.Min(idx.Length, (int)g.IndicesCount) / 3 * 3).Select(v => (int)v).ToArray();
+                    if (trim)
+                    {
+                        var (lp, ln, lu, lc) = (pos.ToList(), nrm.ToList(), uv.ToList(), col.ToList());
+                        tri = clipper!.Trim(lp, ln, lu, lc, tri).tri;
+                        (pos, nrm, uv, col) = (lp.ToArray(), ln.ToArray(), lu.ToArray(), lc.ToArray());
+                    }
                     // Each triangle goes to the cell holding its centroid; vertices are copied per cell as needed
                     var remap = new Dictionary<(int, int), Dictionary<int, uint>>();
                     bool solidSurface = !mat.Blend && !mat.Mask && !mat.Emissive && !water && !mat.Shader.Contains("decal") && !mat.Shader.Contains("glass");
-                    for (int i = 0; i + 2 < idx.Length && i + 2 < g.IndicesCount; i += 3)
+                    for (int i = 0; i + 2 < tri.Count; i += 3)
                     {
-                        var c = (pos[idx[i]] + pos[idx[i + 1]] + pos[idx[i + 2]]) / 3;
-                        for (int k = 0; k < 3; k++) { entMin[ei] = Vector3.Min(entMin[ei], pos[idx[i + k]]); entMax[ei] = Vector3.Max(entMax[ei], pos[idx[i + k]]); }
+                        var c = (pos[tri[i]] + pos[tri[i + 1]] + pos[tri[i + 2]]) / 3;
+                        for (int k = 0; k < 3; k++) { entMin[ei] = Vector3.Min(entMin[ei], pos[tri[i + k]]); entMax[ei] = Vector3.Max(entMax[ei], pos[tri[i + k]]); }
                         if (solidSurface) entVox[ei]?.Add(Voxel(c));
                         var key = ((int)MathF.Floor(c.X / cellSize), (int)MathF.Floor(c.Z / cellSize));
-                        if (roadSurface) roadTris.AddRange([pos[idx[i]], pos[idx[i + 1]], pos[idx[i + 2]]]);
-                        if (solid && !mat.Blend) renderCol.AddRange([pos[idx[i]], pos[idx[i + 1]], pos[idx[i + 2]]]);
+                        if (roadSurface) roadTris.AddRange([pos[tri[i]], pos[tri[i + 1]], pos[tri[i + 2]]]);
+                        if (solid && !mat.Blend) renderCol.AddRange([pos[tri[i]], pos[tri[i + 1]], pos[tri[i + 2]]]);
                         if (water)
                         {
                             waterTris++;
-                            waterArea += Vector3.Cross(pos[idx[i + 1]] - pos[idx[i]], pos[idx[i + 2]] - pos[idx[i]]).Length() / 2;
+                            waterArea += Vector3.Cross(pos[tri[i + 1]] - pos[tri[i]], pos[tri[i + 2]] - pos[tri[i]]).Length() / 2;
                             waterMinY = Math.Min(waterMinY, c.Y); waterMaxY = Math.Max(waterMaxY, c.Y);
                             waterTex.Add(mat.Diffuse ?? mat.Shader);
                         }
@@ -279,7 +308,7 @@ static class MapWriter
                         if (!remap.TryGetValue(key, out var map)) remap[key] = map = [];
                         for (int k = 0; k < 3; k++)
                         {
-                            int vi = idx[i + k];
+                            int vi = tri[i + k];
                             if (!map.TryGetValue(vi, out var ni))
                             {
                                 ni = (uint)(b.Pos.Count / 3);
@@ -303,7 +332,8 @@ static class MapWriter
         var colTriList = new List<(Vector3 a, Vector3 b, Vector3 c)>();
         var colSeen = allCol ? new HashSet<(long, long, long)>() : null;
         long quant(Vector3 v) => ((long)MathF.Round(v.X * 50) * 73856093) ^ ((long)MathF.Round(v.Y * 50) * 19349663) ^ ((long)MathF.Round(v.Z * 50) * 83492791);
-        void addTri(Vector3 a, Vector3 bb, Vector3 c)
+        // `trimmed`: already cut to the clip loops (whole pieces and split ground), so no centroid test
+        void addTri(Vector3 a, Vector3 bb, Vector3 c, bool trimmed = false)
         {
             if (colSeen != null)
             {
@@ -313,6 +343,7 @@ static class MapWriter
                 if (!colSeen.Add(k)) { colDuplicates++; return; }
             }
             var m = (a + bb + c) / 3;
+            if (clipper != null && !trimmed && !clipper.InsideFast(m.X, m.Z)) return;
             MarkVoxels(colVox, a, bb, c);
             colTriList.Add((a, bb, c));
             var key = ((int)MathF.Floor(m.X / cellSize), (int)MathF.Floor(m.Z / cellSize));
@@ -348,13 +379,25 @@ static class MapWriter
             }
             if (b is not BoundGeometry bg || bg.Polygons == null) return;
             bool roadFile = file != null && (roadCol != null || roadMat != null) && (roadCol == null || roadCol.IsMatch(file));
+            // Triangles over shared vertices (so the clipper can find the pieces), and which are road
+            var vp = new List<Vector3>();
+            var vmap = new Dictionary<int, int>();
+            var tris = new List<int>();
+            var road = new List<bool>();
+            int V(int i) { if (!vmap.TryGetValue(i, out var k)) { vmap[i] = k = vp.Count; vp.Add(at(bg.GetVertexPos(i))); } return k; }
             for (int pi = 0; pi < bg.Polygons.Length; pi++)
                 if (bg.Polygons[pi] is BoundPolygonTriangle t)
                 {
-                    Vector3 a = at(bg.GetVertexPos(t.vertIndex1)), b2 = at(bg.GetVertexPos(t.vertIndex2)), c = at(bg.GetVertexPos(t.vertIndex3));
-                    addTri(a, b2, c);
-                    if (roadFile && (roadMat == null || roadMat.Contains((int)bg.GetMaterial(pi).Type))) roadTris.AddRange([a, b2, c]);
+                    tris.AddRange([V(t.vertIndex1), V(t.vertIndex2), V(t.vertIndex3)]);
+                    road.Add(roadFile && (roadMat == null || roadMat.Contains((int)bg.GetMaterial(pi).Type)));
                 }
+            var (keep, src) = clipper != null ? clipper.Trim(vp, null, null, null, tris) : (tris, Enumerable.Range(0, tris.Count / 3).ToList());
+            for (int k = 0; k + 2 < keep.Count; k += 3)
+            {
+                Vector3 a = vp[keep[k]], b2 = vp[keep[k + 1]], c = vp[keep[k + 2]];
+                addTri(a, b2, c, true);
+                if (road[src[k / 3]]) roadTris.AddRange([a, b2, c]);
+            }
         }
         // Some mods ship one combined collision file as well as split ones; skip any bound that
         // contains several others, so the same surfaces aren't added twice
@@ -372,7 +415,7 @@ static class MapWriter
         for (int i = 0; i + 2 < renderCol.Count; i += 3) addTri(renderCol[i], renderCol[i + 1], renderCol[i + 2]);
         if (renderCol.Count > 0) Console.WriteLine($"{renderCol.Count / 3} render triangles added as collision");
         // Bounds: add world-space bounds from .ybn files, plus embedded bounds from all placed drawables/props
-        foreach (var (e, _) in placed)
+        foreach (var (e, _) in placed.Where((_, i) => !clipped[i]))
             if (propBounds.TryGetValue(e.CEntityDef.archetypeName, out var pb) && pb != null)
                 addBounds(pb, Matrix.Scaling(e.Scale) * Matrix.RotationQuaternion(e.Orientation) * Matrix.Translation(e.Position),
                     JenkIndex.GetString(e.CEntityDef.archetypeName));
@@ -459,6 +502,11 @@ static class MapWriter
 
         // Roads: the mod's path nodes, or derived from the road surface
         var roads = deriveRoads ? DerivedRoads(roadTris) : Roads(mod, toGame);
+        if (clip != null)
+        {
+            roads = ClipRoads(roads, inside);
+            Console.WriteLine($"clip: {clippedEntities} entities left out, {roads.nodes.Count} road nodes kept");
+        }
         File.WriteAllText(Path.Combine(outDir, "roads.json"), roads.json.ToJsonString());
 
         // Crop: cells too far from any road are scenery the player can't reach
@@ -745,6 +793,39 @@ static class MapWriter
     }
 
     /// <summary>A road graph derived from road surface triangles (game frame), in the roads.json shape.</summary>
+    /** Entities at least this big (bounding radius, m) are ground or terrain: trimmed by --clip, not dropped whole. */
+    const float ClipWhole = 40;
+
+    /** The road graph less its nodes outside the --clip loops, and every link touching one. */
+    static (List<Vector3> nodes, JsonObject json) ClipRoads((List<Vector3> nodes, JsonObject json) roads, Func<float, float, bool> inside)
+    {
+        var keep = new int[roads.nodes.Count];
+        var nodes = new List<Vector3>();
+        var flagsIn = roads.json["flags"]?.AsArray();
+        var flags = new JsonArray();
+        for (int i = 0; i < roads.nodes.Count; i++)
+        {
+            if (!inside(roads.nodes[i].X, roads.nodes[i].Z)) { keep[i] = -1; continue; }
+            keep[i] = nodes.Count;
+            nodes.Add(roads.nodes[i]);
+            flags.Add(flagsIn != null && i < flagsIn.Count ? flagsIn[i]!.DeepClone() : 0);
+        }
+        var links = new JsonArray();
+        foreach (var l in roads.json["links"]!.AsArray())
+        {
+            int a = (int)l![0]!, b = (int)l[1]!;
+            if (keep[a] < 0 || keep[b] < 0) continue;
+            links.Add(new JsonArray(keep[a], keep[b], l[2]!.DeepClone(), l[3]!.DeepClone()));
+        }
+        var json = new JsonObject
+        {
+            ["nodes"] = new JsonArray(nodes.Select(p => (JsonNode)new JsonArray(Math.Round(p.X, 2), Math.Round(p.Y, 2), Math.Round(p.Z, 2))).ToArray()),
+            ["flags"] = flags,
+            ["links"] = links,
+        };
+        return (nodes, json);
+    }
+
     static (List<Vector3> nodes, JsonObject json) DerivedRoads(List<Vector3> tris)
     {
         var (nodes, links) = RoadDerive.Build(tris);

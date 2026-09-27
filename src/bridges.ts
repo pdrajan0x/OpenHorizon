@@ -19,6 +19,7 @@ const DECK_CLEARANCE = 12; // m above the sea at least, away from the ends
 const MAX_GRADE = 0.06;
 const DECK_DEPTH = 1.6; // m of girder under the road surface
 const BARRIER_HEIGHT = 1.1; // m, the collision wall along each edge
+const BARRIER_GAP = 36; // m at each end with no barrier, so a street the bridge leaves from stays open
 const NODE_SPACING = 25; // m between road-graph nodes on the deck
 const STEP = 4; // m between cross-sections of the deck geometry
 const PILLAR_SPACING = 48; // m
@@ -75,6 +76,8 @@ export interface IslandPlan {
   rect: [number, number, number, number];
   /** Index of this island's node 0 in the merged road graph. */
   base: number;
+  /** World height of the tallest thing (ground, hill, roof) under a point, if known. */
+  top?: (x: number, z: number) => number;
 }
 
 export interface LinkPlan {
@@ -120,7 +123,7 @@ function gateways(island: IslandPlan): Gateway[] {
   island.nodes.forEach((n, i) => {
     const adj = island.adjacent[i];
     if (!adj.length || !adj.some((a) => a.lanes > 0)) return;
-    if (n.y < -1 || n.y > 60) return; // tunnels, and roads far above the sea
+    if (n.y < -1 || n.y > 90) return; // tunnels, and roads far above the sea (an elevated expressway will do)
     const deadEnd = adj.length === 1;
     let dir: THREE.Vector2 | null = null;
     if (deadEnd) {
@@ -132,10 +135,11 @@ function gateways(island: IslandPlan): Gateway[] {
     all.push({ node: i, shoreDist: shoreDist(n.x, n.z), deadEnd, dir });
   });
   all.sort((p, q) => p.shoreDist - q.shoreDist);
-  const limit = (all[0]?.shoreDist ?? 0) + 350;
+  // Roads near any shore: the link planner weighs which side faces the other island
+  const limit = (all[0]?.shoreDist ?? 0) + 1200;
   const near = all.filter((g) => g.shoreDist <= Math.max(limit, 250));
   // Keep the count bounded, spread over the whole shore
-  const step = Math.max(1, Math.floor(near.length / 500));
+  const step = Math.max(1, Math.floor(near.length / 800));
   return near.filter((_, k) => k % step === 0);
 }
 
@@ -144,15 +148,53 @@ function segmentsCross(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: 
   return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
 }
 
+/** A link the world's design asks for, and the axis it should run along: straight across the channel. */
+export interface DesignedLink {
+  a: number;
+  b: number;
+  axis: 'x' | 'z';
+  /** Built in this order (lower first), so a less important link gives way where two would cross. */
+  rank: number;
+}
+
 /**
- * Which islands to join, and where: a minimum spanning tree over the cheapest gateway pair of every
- * two islands (so every city is reachable by road), plus a couple of extra links for loops.
+ * Which islands to join, and where. With `designed` links, exactly those, each leaving from roads near
+ * the facing shores and running as straight along its axis as the roads allow; then whatever else it
+ * takes for every city to be reachable. Otherwise a minimum spanning tree over the cheapest gateway pair
+ * of every two islands, plus a couple of extra links for loops.
  */
-export function planLinks(islands: IslandPlan[], landAt: (x: number, z: number) => number, extra = 2): LinkPlan[] {
+export function planLinks(
+  islands: IslandPlan[], landAt: (x: number, z: number) => number, extra = 2, designed?: DesignedLink[],
+): LinkPlan[] {
   const gates = islands.map(gateways);
   const pairs: LinkPlan[] = [];
+  const key = (a: number, b: number) => (a < b ? `${a},${b}` : `${b},${a}`);
+  const axes = new Map((designed ?? []).map((d) => [key(d.a, d.b), d.axis]));
+  // Over land a bridge is a viaduct through the city: in a designed world it costs twice as much again
+  const landCost = designed ? 3 : 1.5;
+  // A designed link keeps its CANDIDATES cheapest routes, so one crossing another island or bridge can
+  // give way to the next best. The SHORTLIST cheapest by distance are first checked for what stands in
+  // the way of each end's approach: a bridge should leave over open ground, not cut through a hill or
+  // a block of buildings.
+  const CANDIDATES = 40;
+  const SHORTLIST = 300;
+  const blocked = (isl: IslandPlan, from: THREE.Vector3, to: THREE.Vector3, length: number) => {
+    if (!isl.top) return 0;
+    const dx = (to.x - from.x) / length;
+    const dz = (to.z - from.z) / length;
+    let sum = 0;
+    // From 30 m out (the corridor clears kerbs and walls by the road) to where the deck is high and far
+    for (let s = 30; s < Math.min(900, length / 2); s += 20) {
+      const deck = from.y + Math.min(s * MAX_GRADE, Math.max(0, DECK_CLEARANCE - from.y));
+      sum += Math.max(0, isl.top(from.x + dx * s, from.z + dz * s) - deck - 1.5);
+    }
+    return sum * 20; // m of height above the deck × m along it
+  };
+  const options = new Map<string, LinkPlan[]>();
   for (let a = 0; a < islands.length; a++) {
     for (let b = a + 1; b < islands.length; b++) {
+      const axis = axes.get(`${a},${b}`);
+      const top: LinkPlan[] = [];
       let best: LinkPlan | null = null;
       for (const ga of gates[a]) {
         const pa = islands[a].nodes[ga.node];
@@ -163,26 +205,52 @@ export function planLinks(islands: IslandPlan[], landAt: (x: number, z: number) 
           const length = Math.hypot(dx, dz);
           if (length > MAX_ANY_LINK || length < 60) continue;
           // Land to cross at each end costs more than sea; a dead end already pointing across is best
-          let cost = length + 1.5 * (ga.shoreDist + gb.shoreDist) + 8 * Math.abs(pa.y - pb.y);
+          let cost = length + landCost * (ga.shoreDist + gb.shoreDist) + 8 * Math.abs(pa.y - pb.y);
+          // Straight across the channel, not slanting along it
+          if (axis) cost += 2 * Math.abs(axis === 'z' ? dx : dz);
           const align = (g: Gateway, x: number, z: number) => (g.dir ? (g.dir.x * x + g.dir.y * z) / length : -0.2);
           const alA = align(ga, dx, dz);
           const alB = align(gb, -dx, -dz);
           cost -= (Math.max(alA, 0) + Math.max(alB, 0)) * 120;
           cost += (Math.max(-alA, 0) + Math.max(-alB, 0)) * 400; // a road pointing away would loop back
+          if (axis) {
+            if (top.length === SHORTLIST && cost >= top[SHORTLIST - 1].cost) continue;
+            // One route per gateway node on each side, so the options are different places
+            if (top.some((t) => (t.na === ga.node || t.nb === gb.node) && t.cost <= cost)) continue;
+            top.push({ a, b, na: ga.node, nb: gb.node, cost, length });
+            top.sort((p, q) => p.cost - q.cost);
+            if (top.length > SHORTLIST) top.pop();
+            continue;
+          }
           if (best && cost >= best.cost) continue;
           best = { a, b, na: ga.node, nb: gb.node, cost, length };
         }
       }
-      if (!best) continue;
-      const pa = islands[a].nodes[best.na];
-      const pb = islands[b].nodes[best.nb];
       // Not straight across a third island
-      let blocked = false;
-      for (let t = 0; t <= 1 && !blocked; t += 40 / best.length) {
-        const k = landAt(pa.x + (pb.x - pa.x) * t, pa.z + (pb.z - pa.z) * t);
-        blocked = k >= 0 && k !== a && k !== b;
-      }
-      if (!blocked) pairs.push(best);
+      const clear = (l: LinkPlan) => {
+        const pa = islands[a].nodes[l.na];
+        const pb = islands[b].nodes[l.nb];
+        for (let t = 0; t <= 1; t += 40 / l.length) {
+          const k = landAt(pa.x + (pb.x - pa.x) * t, pa.z + (pb.z - pa.z) * t);
+          if (k >= 0 && k !== a && k !== b) return false;
+        }
+        return true;
+      };
+      if (axis) {
+        // What stands on each end's approach: every m² of hill or building above the deck counts
+        for (const l of top) {
+          const pa = islands[a].nodes[l.na];
+          const pb = islands[b].nodes[l.nb];
+          l.cost += 0.5 * (blocked(islands[a], pa, pb, l.length) + blocked(islands[b], pb, pa, l.length));
+        }
+        top.sort((p, q) => p.cost - q.cost);
+        top.length = Math.min(top.length, CANDIDATES);
+        const ok = top.filter(clear);
+        if (ok.length) {
+          options.set(`${a},${b}`, ok);
+          pairs.push(ok[0]);
+        }
+      } else if (best && clear(best)) pairs.push(best);
     }
   }
   pairs.sort((p, q) => p.cost - q.cost);
@@ -195,6 +263,26 @@ export function planLinks(islands: IslandPlan[], landAt: (x: number, z: number) 
     const [r, s] = ends(c);
     return segmentsCross(p, q, r, s);
   });
+  if (designed) {
+    // By rank, then cheapest; each takes its best route that doesn't cross one already built
+    const order = designed
+      .map((d) => ({ d, opts: options.get(key(d.a, d.b)) }))
+      .filter((x): x is { d: DesignedLink; opts: LinkPlan[] } => !!x.opts)
+      .sort((p, q) => p.d.rank - q.d.rank || p.opts[0].cost - q.opts[0].cost);
+    for (const { opts } of order) {
+      const route = opts.find((o) => !crosses(o));
+      if (!route) continue;
+      chosen.push(route);
+      parent[find(route.a)] = find(route.b);
+    }
+    // Anything the design left cut off (a city it doesn't know) joins by its cheapest link
+    for (const p of pairs) {
+      const ra = find(p.a);
+      const rb = find(p.b);
+      if (ra !== rb && !crosses(p)) { parent[ra] = rb; chosen.push(p); }
+    }
+    return chosen;
+  }
   const rest: LinkPlan[] = [];
   for (const p of pairs) {
     const ra = find(p.a);
@@ -404,24 +492,37 @@ export class BridgeNetwork {
     const half = DECK_WIDTH / 2;
     const at = (f: Frame, x: number, y: number) =>
       new THREE.Vector3().copy(f.p).addScaledVector(f.r, x).setY(f.p.y + y);
-    // --- Collision: road surface and a wall along each edge ---
-    const col: number[] = [];
-    const colIdx: number[] = [];
-    const section = [[-half, BARRIER_HEIGHT], [-half, 0], [half, 0], [half, BARRIER_HEIGHT]];
-    frames.forEach((f, i) => {
-      // The first and last metres dip a hair under the city's road so there's no lip to hit
-      const dip = i === 0 || i === frames.length - 1 ? -0.12 : 0;
-      for (const [x, y] of section) {
-        const v = at(f, x, y + dip);
-        col.push(v.x, v.y, v.z);
-      }
-      if (i === 0) return;
-      const a = (i - 1) * 4;
-      const b = i * 4;
-      for (let k = 0; k < 3; k++) colIdx.push(a + k, a + k + 1, b + k, b + k, a + k + 1, b + k + 1);
-    });
-    world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(col), new Uint32Array(colIdx))
-      .setFriction(1).setCollisionGroups(STATIC_GROUPS));
+    // The barriers stop BARRIER_GAP m short of each end: a bridge often leaves from the side of a street,
+    // and a wall end standing in that street would be the thing you hit
+    const g = Math.round(BARRIER_GAP / STEP);
+    const inner = frames.length > 2 * g + 4
+      ? frames.slice(g, frames.length - g).map((f) => ({ ...f, s: f.s - frames[g].s }))
+      : [];
+    // --- Collision: the road surface, and a wall along each edge between the gaps ---
+    const strip = (fs: Frame[], section: [number, number][], dipEnds: boolean) => {
+      const col: number[] = [];
+      const colIdx: number[] = [];
+      const m = section.length;
+      fs.forEach((f, i) => {
+        // The first and last metres dip a hair under the city's road so there's no lip to hit
+        const dip = dipEnds && (i === 0 || i === fs.length - 1) ? -0.12 : 0;
+        for (const [x, y] of section) {
+          const v = at(f, x, y + dip);
+          col.push(v.x, v.y, v.z);
+        }
+        if (i === 0) return;
+        const a = (i - 1) * m;
+        const b = i * m;
+        for (let k = 0; k < m - 1; k++) colIdx.push(a + k, a + k + 1, b + k, b + k, a + k + 1, b + k + 1);
+      });
+      world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(col), new Uint32Array(colIdx))
+        .setFriction(1).setCollisionGroups(STATIC_GROUPS));
+    };
+    strip(frames, [[-half, 0], [half, 0]], true);
+    if (inner.length) {
+      strip(inner, [[-half, BARRIER_HEIGHT], [-half, 0]], false);
+      strip(inner, [[half, 0], [half, BARRIER_HEIGHT]], false);
+    }
 
     // --- Deck: kit pieces, else a ribbon ---
     const deck = this.kit.deck;
@@ -437,17 +538,19 @@ export class BridgeNetwork {
 
     // --- Barriers along both edges ---
     const barrier = this.kit.barrier;
-    if (barrier) {
+    if (!inner.length) {
+      // A short link: no barriers at all
+    } else if (barrier) {
       const stretch = barrier.part.stretch ?? 1;
       for (const side of [-1, 1]) {
-        this.instanceAlong(frames, barrier, () => ({
+        this.instanceAlong(inner, barrier, () => ({
           x: side * (half - barrier.width / 2), y: -barrier.min.y, sx: stretch, sy: 1, sz: 1,
         }), barrier.length * stretch, true);
       }
     } else {
       for (const side of [-1, 1]) {
         const x = side * half;
-        this.ribbon(frames, [[x, 0], [x, BARRIER_HEIGHT], [x + side * 0.4, BARRIER_HEIGHT], [x + side * 0.4, -DECK_DEPTH]], this.mats.concrete, [0, 0.3, 0.4, 1], false);
+        this.ribbon(inner, [[x, 0], [x, BARRIER_HEIGHT], [x + side * 0.4, BARRIER_HEIGHT], [x + side * 0.4, -DECK_DEPTH]], this.mats.concrete, [0, 0.3, 0.4, 1], false);
       }
     }
 

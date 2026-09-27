@@ -74,7 +74,9 @@ if has props; then
   for d in .mods/props-*/; do [[ -d $d/x ]] && unpack "${d%/}"; done
 fi
 
-# 5. Cities: every map in assets/maps.json, with its own flags (found with `gta5conv map <dir> --inspect`)
+# 5. Cities: every map in assets/maps.json, with its own flags (found with `gta5conv map <dir> --inspect`).
+#    --clip gives a square map an organic coastline; the shapes in assets/coast-shapes/ come from
+#    scripts/shape-coast.mjs, run once on the unclipped conversion
 if has maps; then
   while IFS=$'\t' read -r id mod args; do
     [[ -d .mods/$mod ]] || { echo "- $id: .mods/$mod missing"; continue; }
@@ -89,5 +91,6 @@ if has maps; then
   done < <(node -e 'for (const m of require("./assets/maps.json")) console.log([m.id, m.mod, m.args.map((a) => `'"'"'${a}'"'"'`).join(" ")].join("\t"))')
 fi
 
-has index && node scripts/map-index.mjs
+# Island outlines and height maps (src/islands.ts lays the cities out and plans the bridges with them), then the index
+has index && node scripts/island-stats.mjs && node scripts/map-index.mjs
 echo "setup done: npm run play"

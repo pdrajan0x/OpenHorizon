@@ -13,6 +13,7 @@ import { Minimap } from './minimap';
 import { PostFX } from './postfx';
 import { RivalPack, type Rival } from './rivals';
 import { Islands } from './islands';
+import { RaceField } from './map';
 import { Ocean, SEA_LEVEL } from './ocean';
 import { WorldMap } from './worldmap';
 import { Stunts } from './stunts';
@@ -27,6 +28,8 @@ const REAR_WHEELS = [2, 3];
 const UPSIDE_DOWN_RESET_SECONDS = 2;
 const TRAFFIC_CARS = 24;
 const DENT_DV = 3; // m/s of velocity change in one step that leaves a mark on the body
+const GPS_REFRESH = 0.4; // s between re-routes to the waypoint
+const WAYPOINT_ARRIVED = 30; // m of driving left when the waypoint counts as reached
 const CRASH_SECONDS = 2.2; // real seconds of crash cam before driving on from where the car stopped
 const CRASH_SLOW_SECONDS = 1.6;
 const CRASH_TIME_SCALE = 0.3;
@@ -102,15 +105,32 @@ async function main(): Promise<void> {
   const events = new Events(scene, hud, audio, map.roads, eventDefs);
   // M: the full map; the world pauses while it's open
   const hudElement = document.getElementById('hud')!;
-  const worldMap = new WorldMap(map, (open) => hudElement.classList.toggle('hidden', open));
+  // GPS waypoint set on the big map: the shortest drive there, refreshed as you go. An event's own
+  // route takes over while it runs.
+  let waypoint: { field: RaceField; at: THREE.Vector3; gps: THREE.Vector3[]; timer: number } | null = null;
+  const routeWaypoint = () => {
+    if (!waypoint) return;
+    const p = player.body.translation();
+    waypoint.gps = [new THREE.Vector3(p.x, 0, p.z), ...waypoint.field.route(waypoint.field.nextNode(p.x, p.z)).map((n) => map.roads.nodes[n].clone())];
+    waypoint.timer = GPS_REFRESH;
+  };
+  const worldMap = new WorldMap(map, (open) => hudElement.classList.toggle('hidden', open), (at) => {
+    if (!at) waypoint = null;
+    else {
+      const node = map.roads.nearestNode(at.x, at.y);
+      waypoint = { field: new RaceField(map.roads, node), at: map.roads.nodes[node].clone(), gps: [], timer: 0 };
+      routeWaypoint();
+    }
+    worldMap.refresh(mapExtras());
+  });
   const mapExtras = () => ({
     events: events.mapMarkers(),
     rivals: rivals.rivals.map((r) => {
       const q = r.car.body.translation();
       return new THREE.Vector3(q.x, q.y, q.z);
     }),
-    route: events.gps(),
-    destination: events.destination(),
+    route: events.gps() ?? waypoint?.gps ?? null,
+    destination: events.destination() ?? waypoint?.at ?? null,
   });
   audio.setEngine(player.tuning.engineSound ?? 'lambo-v12');
   hud.showCar(player);
@@ -387,6 +407,13 @@ async function main(): Promise<void> {
     }
     hud.update(dt, player, fps.text);
     hud.setProgress(`EVENTS ${events.completed}/${events.defs.length}`);
+    if (waypoint && (waypoint.timer -= dt) <= 0) {
+      if (waypoint.field.remaining(p.x, p.z) < WAYPOINT_ARRIVED) {
+        waypoint = null;
+        worldMap.clearWaypoint();
+        hud.banner('ARRIVED', 'GPS waypoint reached', 'info', 2);
+      } else routeWaypoint();
+    }
     if (frameCount++ % 2 === 0) {
       const extras = mapExtras();
       minimap.draw(p.x, p.z, player.heading, traffic.positions(), extras);
