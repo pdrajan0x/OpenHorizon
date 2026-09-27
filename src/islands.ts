@@ -9,109 +9,22 @@
 //                    (2nd percentile > 8 m, e.g. Hong Kong at GTA Z 500) is lowered to sit at +3 m
 //   land outline     coast.json (scripts/map-extras.mjs), else island.json (scripts/island-stats.mjs),
 //                    else a coarse outline around the roads, worked out here
-//   layout           LAYOUT below: two rows of cities facing each other across a straight strait, joined
-//                    by bridges between neighbours; a city the layout doesn't name is packed by shape
-//                    next to the rest, GAP m of sea from any other land
+//   layout           src/layout.ts: three continents side by side, each with a temperate north and a
+//                    warm south, neighbours a short bridge apart; a city the design doesn't name is
+//                    packed by shape next to the rest, GAP m of sea from any other land
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
-import { BridgeNetwork, DECK_WIDTH, planLinks, type DesignedLink, type IslandPlan } from './bridges';
+import { BridgeNetwork, DECK_WIDTH, planLinks, type IslandPlan } from './bridges';
 import { Coast, area } from './coast';
 import { Corridors } from './corridors';
 import { GameMap, RoadGraph, type Manifest, type RoadData } from './map';
+import { worldLayout } from './layout';
 import { cleanMask, traceLoops, verticalOffset, type CoastLoop } from './outline';
 
 const GAP = 300; // m of open sea between neighbouring islands' land
 const PACK_CELL = 100; // m per cell of the packing grid
 const STREAM_MARGIN = 900; // m beyond an island's shore at which it starts streaming in
 const BRIDGE_LANES = 2; // each way
-const STRAIT = 800; // m of sea between the two rows
-const CHANNEL = 800; // m of sea between neighbours in a row
-
-/**
- * The world's design, x north and z east: a small globe. Two rows face each other across one straight
- * strait running west to east. The north row is the temperate world, the south row the warm one, and
- * along each row the regions go round the world west to east (the Americas, the Mediterranean and the
- * Gulf, East Asia), so every warm region lies south of its temperate neighbour: Miami below Chicago, the
- * Gulf below the Riviera, Hong Kong and Fukuoka below Tokyo. Climates never touch: REGION_GAP m of open
- * sea separates regions, CHANNEL m separates neighbours within one. A column is one city on the strait,
- * or a stack of them running away from it: behind Shinjuku come Shibuya, then the Kanto mountains
- * (Tsukuba, then Akina), as they lie north of Tokyo; at the far end of the Dubai desert highway, the
- * palm islands, as Sheikh Zayed Road runs out to the coast. Bridges join neighbouring columns along the strait,
- * each stack front to back, the `crossings` over the strait (one per region) and the extra `links`.
- */
-type Column = string | string[];
-const LAYOUT: { north: Column[][]; south: Column[][]; crossings: string[][]; links: string[][] } = {
-  north: [
-    ['nfsu2-bayview', 'chicago'], // the US: West Coast, Great Lakes
-    ['monaco-gp'], // the Mediterranean
-    ['midnight-shuto', ['tokyo-shinjuku', 'shibuya', 'tsukuba', 'akina']], // Tokyo and the Kanto mountains
-  ],
-  south: [
-    ['miami'], // Florida
-    [['dubai-highway', 'dubai-islands']], // the Gulf: the desert highway runs out to the palm islands at its far end
-    ['hong-kong', 'fukuoka-expressway'], // subtropical East Asia
-  ],
-  crossings: [['chicago', 'miami'], ['monaco-gp', 'dubai-highway'], ['midnight-shuto', 'fukuoka-expressway']],
-  // The Shuto's northern end runs up to the mountains: a loop round Kanto
-  links: [['midnight-shuto', 'akina']],
-};
-const REGION_GAP = 2000; // m of open sea between climate regions
-const STACK_GAP = 500; // m of sea between the islands of one column
-
-/** Where LAYOUT puts each city (the offset of its own frame, or null if it isn't in the design), and the designed links. */
-function designLayout(list: { id: string; rect: [number, number, number, number] }[]): {
-  placed: ([number, number] | null)[];
-  links: DesignedLink[];
-} {
-  const index = new Map(list.map((l, k) => [l.id, k]));
-  const placed: ([number, number] | null)[] = list.map(() => null);
-  const links: DesignedLink[] = [];
-  const width = (k: number) => list[k].rect[3] - list[k].rect[1];
-  const height = (k: number) => list[k].rect[2] - list[k].rect[0];
-  const row = (regions: Column[][], north: boolean) => {
-    // Columns of the cities that exist, each tagged with its region
-    const cols: { ks: number[]; region: number }[] = [];
-    regions.forEach((region, r) => {
-      for (const c of region) {
-        const ks = (Array.isArray(c) ? c : [c]).map((id) => index.get(id)).filter((k): k is number => k !== undefined);
-        if (ks.length) cols.push({ ks, region: r });
-      }
-    });
-    const colWidth = cols.map((c) => Math.max(...c.ks.map(width)));
-    const gap = (i: number) => (cols[i].region === cols[i - 1].region ? CHANNEL : REGION_GAP);
-    const total = colWidth.reduce((s, w, i) => s + w + (i > 0 ? gap(i) : 0), 0);
-    let z = -total / 2;
-    cols.forEach(({ ks }, i) => {
-      if (i > 0) z += gap(i);
-      const mid = z + colWidth[i] / 2;
-      // From the strait outward: the first city's shore sits on the strait's edge
-      let edge = north ? STRAIT / 2 : -STRAIT / 2;
-      ks.forEach((k, j) => {
-        const r = list[k].rect;
-        placed[k] = [north ? edge - r[0] : edge - r[2], mid - (r[1] + r[3]) / 2];
-        edge += (north ? 1 : -1) * (height(k) + STACK_GAP);
-        if (j > 0) links.push({ a: ks[j - 1], b: k, axis: 'x', rank: 0 });
-      });
-      // Neighbours in one region first; the long links between regions give way to the crossings
-      if (i > 0) links.push({ a: cols[i - 1].ks[0], b: ks[0], axis: 'z', rank: cols[i].region === cols[i - 1].region ? 0 : 2 });
-      z += colWidth[i];
-    });
-  };
-  row(LAYOUT.north, true);
-  row(LAYOUT.south, false);
-  // Crossings span the strait (north–south); an extra link runs along whichever way its ends lie
-  const centre = (k: number) => [placed[k]![0] + (list[k].rect[0] + list[k].rect[2]) / 2, placed[k]![1] + (list[k].rect[1] + list[k].rect[3]) / 2];
-  for (const [ids, cross] of [[LAYOUT.crossings, true], [LAYOUT.links, false]] as const) {
-    for (const [a, b] of ids) {
-      const ka = index.get(a);
-      const kb = index.get(b);
-      if (ka === undefined || kb === undefined || !placed[ka] || !placed[kb]) continue;
-      const [ca, cb] = [centre(ka), centre(kb)];
-      links.push({ a: ka, b: kb, axis: cross || Math.abs(cb[0] - ca[0]) > Math.abs(cb[1] - ca[1]) ? 'x' : 'z', rank: cross ? 1 : 3 });
-    }
-  }
-  return { placed, links };
-}
 
 export interface IslandInfo {
   id: string;
@@ -404,12 +317,12 @@ export class Islands {
       return { info, data, dy, loops, rect, water };
     });
 
-    // Layout: the designed rows for the cities LAYOUT names; any other, largest first, packed by shape
+    // Layout: the designed places for the cities src/layout.ts names; any other, largest first, packed by shape
     // as close to the rest as it fits with GAP m of sea to any other land
     const occ = new Occupancy();
     const offsets: THREE.Vector3[] = shaped.map((s) => new THREE.Vector3(0, s.dy, 0));
     const masks = shaped.map((s) => rasterize(s.loops));
-    const design = only ? null : designLayout(shaped.map((s) => ({ id: s.info.id, rect: s.rect })));
+    const design = only ? null : worldLayout(shaped.map((s) => ({ id: s.info.id, rect: s.rect })));
     const free: number[] = [];
     shaped.forEach((_, k) => {
       const at = design?.placed[k];

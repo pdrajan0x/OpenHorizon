@@ -22,6 +22,9 @@ const INFO = {
   'nfsu2-bayview': { name: 'Bayview', area: 'tuner city: downtown, beach, airport and hills' },
   tsukuba: { name: 'Mt. Tsukuba', area: 'mountain forest: a touge climbing through cedar woods' },
   akina: { name: 'Mt. Akina', area: 'mountain pass: the Initial D hairpins of Mt. Haruna' },
+  'french-riviera': { name: 'French Riviera', area: 'Mediterranean coast: seaside roads, villas and a hillside circuit' },
+  gostown: { name: 'Gostown', area: 'tropical city: downtown, docks, tunnels and the bay bridge' },
+  lordcity: { name: 'LordCity', area: 'forested hills: winding highways, tunnels and a cable-stayed bridge' },
 };
 const FIRST = ['chicago', 'miami'];
 

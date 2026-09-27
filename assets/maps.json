@@ -11,5 +11,8 @@
   {"id": "dubai-highway", "mod": "map-dubai-highway", "args": []},
   {"id": "dubai-islands", "mod": "map-dubai-islands", "args": ["--cell", "250", "--crop", "600"]},
   {"id": "tsukuba", "mod": "map-tsukuba-touge", "args": ["--road-mat", "4", "--clip", "assets/coast-shapes/tsukuba.json"]},
-  {"id": "akina", "mod": "map-akina", "args": ["--road-mat", "1"]}
+  {"id": "akina", "mod": "map-akina", "args": ["--road-mat", "1"]},
+  {"id": "french-riviera", "mod": "map-french-riviera", "args": ["--cell", "250", "--crop", "500"]},
+  {"id": "gostown", "mod": "map-gostown-paradise", "args": ["--cell", "250", "--crop", "500", "--road-tex", "^route_0[0-9]b?$"]},
+  {"id": "lordcity", "mod": "map-lordcity", "args": ["--cell", "250", "--road-tex", "^road__DIFFUSE$"]}
 ]

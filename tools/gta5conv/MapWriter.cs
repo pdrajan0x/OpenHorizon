@@ -23,6 +23,10 @@
 //                     (scripts/shape-coast.mjs). Smaller entities are kept or left out whole by where they
 //                     stand; bigger ones (ground, terrain) and the collision are trimmed triangle by triangle;
 //                     road nodes outside are dropped
+//   --standins <file.json>  models for archetypes neither the map nor its props packs ship
+//                     ({"rules": [{"for": [names], "use": [names], "scale": [min, max], "turn": bool}]}): each
+//                     placement gets one of the "use" models (from the map or a --props pack) picked by where it
+//                     stands, so neighbours differ, optionally scaled a little and turned about its up axis
 //
 // Cell .bin: u32 json length, JSON { batches: [{ material, vertices, indices, colors?, detail? }] }, padding
 // to 4 bytes, then per batch: f32 position×3, f32 normal×3, f32 uv×2 (+ u8 RGBA vertex colour when
@@ -71,6 +75,7 @@ static class MapWriter
         System.Text.RegularExpressions.Regex renderColRe = null;
         var renderCol = new List<Vector3>(); // render triangles that also collide (--render-col)
         List<Vector2[]> clip = null;
+        var standins = new Dictionary<uint, StandIn>();
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--cell") cellSize = float.Parse(args[++i]);
@@ -86,6 +91,15 @@ static class MapWriter
             if (args[i] == "--clip")
                 clip = JsonNode.Parse(File.ReadAllText(args[++i]))!["loops"]!.AsArray()
                     .Select(l => l!["points"]!.AsArray().Select(p => new Vector2((float)p![0]!, (float)p[1]!)).ToArray()).ToList();
+            if (args[i] == "--standins")
+                foreach (var r in JsonNode.Parse(File.ReadAllText(args[++i]))!["rules"]!.AsArray())
+                {
+                    uint hash(JsonNode n) { var s = n!.GetValue<string>().ToLowerInvariant(); JenkIndex.Ensure(s); return JenkHash.GenHash(s); }
+                    var scale = r!["scale"]?.AsArray();
+                    var rule = new StandIn(r["use"]!.AsArray().Select(hash).ToArray(),
+                        scale != null ? (float)scale[0]! : 1, scale != null ? (float)scale[1]! : 1, r["turn"]?.GetValue<bool>() ?? false);
+                    foreach (var n in r["for"]!.AsArray()) standins[hash(n)] = rule;
+                }
         }
         // Inside the clip loops (even-odd over all of them), game frame
         var clipper = clip != null ? new Clipper(clip) : null;
@@ -188,20 +202,41 @@ static class MapWriter
         var placed = new List<(YmapEntityDef e, DrawableBase d)>();
         int missing = 0, mloEntities = 0;
         var missingNames = new Dictionary<string, int>();
+        var stoodIn = new Dictionary<string, int>();
         foreach (var y in ymaps.Values)
             foreach (var e in expand(y).ToList())
             {
                 if (mloArchetypes.ContainsKey(e.CEntityDef.archetypeName)) continue; // the interior itself has no mesh
                 if (e.MloParent != null) mloEntities++;
-                var lod = e.CEntityDef.lodLevel;
-                if (lod is rage__eLodType.LODTYPES_DEPTH_SLOD1 or rage__eLodType.LODTYPES_DEPTH_SLOD2 or rage__eLodType.LODTYPES_DEPTH_SLOD3 or rage__eLodType.LODTYPES_DEPTH_SLOD4) continue;
+                // Low-detail stand-ins for detailed children are left out. A "SLOD" nothing refers to is the model
+                // itself: some maps (Sunshine Dream) flag their ground and blocks SLOD3 to keep them drawn from afar
                 if (hasChildren.Contains(e)) continue;
+                var lod = e.CEntityDef.lodLevel;
+                bool slod = lod is rage__eLodType.LODTYPES_DEPTH_SLOD1 or rage__eLodType.LODTYPES_DEPTH_SLOD2 or rage__eLodType.LODTYPES_DEPTH_SLOD3 or rage__eLodType.LODTYPES_DEPTH_SLOD4;
+                if (slod && (e.CEntityDef.parentIndex >= 0 || e.CEntityDef.numChildren > 0)) continue;
                 var name = JenkIndex.GetString(e.CEntityDef.archetypeName);
                 if (name.Contains("slod") || name.EndsWith("_lod")) continue;
                 var d = drawableFor(e.CEntityDef.archetypeName);
+                if (d == null && standins.TryGetValue(e.CEntityDef.archetypeName, out var rule))
+                {
+                    // A stand-in: one of the rule's models by where it stands (the first that exists from there on)
+                    uint h = Mix(e.Position);
+                    for (int k = 0; k < rule.Use.Length && d == null; k++)
+                    {
+                        var alt = rule.Use[(h + k) % rule.Use.Length];
+                        if ((d = drawableFor(alt)) == null) continue;
+                        var def = e.CEntityDef; def.archetypeName = alt; e.CEntityDef = def;
+                        float f = rule.Min + (rule.Max - rule.Min) * ((h >> 8) & 1023) / 1023f;
+                        if (f != 1) e.Scale *= f;
+                        if (rule.Turn) e.Orientation = Quaternion.RotationMatrix(Matrix.RotationQuaternion(e.Orientation) * Matrix.RotationZ(((h >> 18) & 1023) / 1024f * MathF.PI * 2));
+                        stoodIn[name] = stoodIn.GetValueOrDefault(name) + 1;
+                    }
+                }
                 if (d == null) { missing++; missingNames[name] = missingNames.GetValueOrDefault(name) + 1; continue; }
                 placed.Add((e, d));
             }
+
+        if (stoodIn.Count > 0) Console.WriteLine($"stand-ins: {stoodIn.Values.Sum()} placements of {stoodIn.Count} missing models ({string.Join(", ", stoodIn.OrderByDescending(kv => kv.Value).Take(8).Select(kv => $"{kv.Key} {kv.Value}"))})");
 
         // World positions → game frame; recentre on the middle of everything placed
         var min = new Vector3(float.MaxValue); var max = new Vector3(float.MinValue);
@@ -668,6 +703,16 @@ static class MapWriter
         File.WriteAllText(Path.Combine(outDir, "missing.json"), JsonSerializer.Serialize(missingNames.OrderByDescending(kv => kv.Value).ToDictionary(), new JsonSerializerOptions { WriteIndented = true }));
         File.WriteAllText(Path.Combine(outDir, "manifest.json"), manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"{outDir}: {placed.Count} entities ({missing} missing: {string.Join(",", missingNames.Keys.Take(8))}), {triangles} tris, {cellList.Count} cells, {colTris} collision tris, {written} textures ({missingTex.Count} missing: {string.Join(",", missingTex.Take(10))}), {roads.nodes.Count} road nodes");
+    }
+
+    record StandIn(uint[] Use, float Min, float Max, bool Turn);
+
+    /// <summary>A well-mixed hash of a position (to half a metre): the same placement always picks the same.</summary>
+    static uint Mix(Vector3 p)
+    {
+        uint h = (uint)(int)MathF.Round(p.X * 2) * 73856093u ^ (uint)(int)MathF.Round(p.Y * 2) * 19349663u ^ (uint)(int)MathF.Round(p.Z * 2) * 83492791u;
+        h ^= h >> 16; h *= 0x7feb352d; h ^= h >> 15; h *= 0x846ca68b; h ^= h >> 16;
+        return h;
     }
 
     const int PropTriangles = 15000;

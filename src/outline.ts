@@ -203,9 +203,12 @@ function resample(pts: [number, number][], spacing: number): [number, number][] 
   return out;
 }
 
-/** Vertical shift that puts a map on the shared sea (HANDOFF plan B). */
+/**
+ * Vertical shift that puts a map on the shared sea (HANDOFF plan B). The map's own water is its sea only
+ * if it lies no higher than its lowest roads: a lake or pool up a hill (Gostown has one 420 m up) isn't.
+ */
 export function verticalOffset(water: { minY: number } | null | undefined, groundP2: number, roadP1: number): number {
-  if (water && Number.isFinite(water.minY)) return -water.minY;
+  if (water && Number.isFinite(water.minY) && water.minY <= roadP1 + 3) return -water.minY;
   const base = Math.min(groundP2, roadP1);
   return base > 8 ? 3 - base : 0;
 }
