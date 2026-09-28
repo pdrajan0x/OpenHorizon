@@ -18,13 +18,15 @@ const scans = new Map<string, Promise<(THREE.Texture | null)[]>>();
 
 /**
  * The replacement for one of a city's textures, or null. A material with no texture at all (GTA's layered
- * terrain shaders, which the converter doesn't read) is matched by its shader: "shader:<name>".
+ * terrain shaders, which the converter doesn't read) is matched by its shader: "shader:<name>"; any one
+ * material by its number in the map's manifest: "#<index>".
  */
-export async function retextureOf(city: string, texture: string | null | undefined, shader?: string): Promise<Entry | null> {
+export async function retextureOf(city: string, texture: string | null | undefined, shader?: string, index?: number): Promise<Entry | null> {
   let l = lists.get(city);
   if (!l) lists.set(city, (l = fetch(`/mods/maps/${city}/retexture.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}))));
   const list = await l;
-  return (texture ? list[texture] : shader ? list[`shader:${shader}`] : null) ?? null;
+  // One material by its number in the manifest ("#1289"), else by texture, else (untextured) by shader
+  return (index !== undefined ? list[`#${index}`] : undefined) ?? (texture ? list[texture] : shader ? list[`shader:${shader}`] : null) ?? null;
 }
 
 function load(scan: string): Promise<(THREE.Texture | null)[]> {
