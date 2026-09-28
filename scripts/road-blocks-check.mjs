@@ -15,6 +15,7 @@ try {
   await page.goto(server.resolvedUrls.local[0] + '?debug&audit&traffic=0', { timeout: 300_000, waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 1 && window.__audit, null, { timeout: 300_000 });
   for (const [id, k] of Object.entries(ids)) {
+    if (process.argv[2] && !process.argv.slice(2).includes(id)) continue;
     const blocks = JSON.parse(fs.readFileSync(`public/mods/maps/${id}/blocks.json`));
     const dy = JSON.parse(fs.readFileSync(`public/mods/maps/${id}/island.json`)).dy ?? 0;
     let clear = 0;
@@ -34,6 +35,7 @@ try {
         return worst;
       }, [...w, dx, dz]);
       if (hit === null) clear++;
+      else console.log(`  ${id} still blocked at (${x}, ${z}) map frame: something ${hit.toFixed(1)} m along the ray`);
     }
     console.log(`${id}: ${clear} of ${blocks.length} spots clear along the road at bumper height`);
   }

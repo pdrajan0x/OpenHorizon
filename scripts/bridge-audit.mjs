@@ -33,15 +33,19 @@ function toLine(pts, halfs, x, z) {
 const rows = [];
 for (const i of issues) {
   const [x, , z] = i.position;
+  // The nearest bridge, then where on it
   let where = 'elsewhere';
   let which = -1;
+  let best = Infinity;
   bridges.forEach((b, n) => {
     const line = [b.ends[0], ...b.nodes, b.ends[1]].filter(Boolean);
     const halfs = [b.halfWidths[0], ...b.halfWidths, b.halfWidths[b.halfWidths.length - 1]];
     const { d, hw } = toLine(line, halfs, x, z);
+    if (d >= best) return;
+    best = d;
+    which = n;
     const join = Math.min(...b.ends.map((e) => Math.hypot(e[0] - x, e[2] - z)));
-    if (i.group.includes('bridges') || d <= hw + NEAR) { where = 'on a bridge'; which = n; }
-    else if (where !== 'on a bridge' && join <= JOIN) { where = 'at a join'; which = n; }
+    where = i.group.includes('bridges') || d <= hw + NEAR ? 'on a bridge' : join <= JOIN ? 'at a join' : 'elsewhere';
   });
   rows.push({ ...i, where, bridge: which + 1 });
 }

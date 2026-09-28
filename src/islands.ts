@@ -24,7 +24,7 @@ import { cleanMask, traceLoops, verticalOffset, type CoastLoop } from './outline
 
 const GAP = 300; // m of open sea between neighbouring islands' land
 const PACK_CELL = 100; // m per cell of the packing grid
-const BLOCK_REACH = 6; // m along the road either side of an obstruction, cleared
+const BLOCK_REACH = 14; // m along the road either side of an obstruction, cleared (a wall may start a little before where it was found)
 const STREAM_MARGIN = 900; // m beyond an island's shore at which it starts streaming in
 
 export interface IslandInfo {
