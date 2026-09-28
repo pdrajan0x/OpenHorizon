@@ -32,6 +32,7 @@ const CONTROLS: [string, string, string][] = [
   ['Camera', 'Y', 'V / C'],
   ['Back on the road', 'D-pad up', 'R'],
   ['Map', 'View', 'M'],
+  ['Mark this spot (shows and copies where you are)', 'D-pad down', 'P'],
   ['Pause menu', 'Menu', 'Esc'],
 ];
 

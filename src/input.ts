@@ -34,6 +34,7 @@ export interface Actions {
   car: number | null; // garage slot picked with the number keys
   menu: boolean; // open or close the pause menu
   map: boolean; // the big map (the M key is handled by the map itself)
+  mark: boolean; // note where the car is (P, or D-pad down): for reporting a spot
 }
 
 /** Menu navigation, one step per press. */
@@ -57,6 +58,7 @@ const KEYS = {
   camera: ['KeyV', 'KeyC'],
   fps: ['KeyF'],
   help: ['KeyH'],
+  mark: ['KeyP'],
   quit: ['Backspace'],
   menu: ['Escape'],
   cars: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'],
@@ -245,6 +247,7 @@ export class Input {
       car: KEYS.cars.findIndex((code) => this.pressed.has(code)),
       menu: tapped(KEYS.menu),
       map: false,
+      mark: tapped(KEYS.mark),
     };
     if (actions.car === -1) actions.car = null;
     const nav = this.nav;
@@ -286,6 +289,7 @@ export class Input {
       actions.reset ||= tappedButton('up');
       actions.map ||= tappedButton('view');
       actions.menu ||= tappedButton('menu');
+      actions.mark ||= tappedButton('down');
 
       // Right stick: look where it points, as far round as it's pushed; B or R3 held looks behind
       const mag = Math.hypot(p.rx, p.ry);

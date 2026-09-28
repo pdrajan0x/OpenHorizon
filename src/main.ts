@@ -205,6 +205,28 @@ async function main(): Promise<void> {
     return hit ? hit.timeOfImpact : Infinity;
   };
 
+  // Where the car is, for reporting a spot: the city, world coordinates, and the city's own (its map files)
+  const spot = (p: THREE.Vector3) => {
+    const { map: m, info } = map.islandAt(p);
+    const local = p.clone().sub(m.offset);
+    return `${info.name} ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} (map ${local.x.toFixed(0)}, ${local.y.toFixed(0)}, ${local.z.toFixed(0)})`;
+  };
+  /** P / D-pad down: show where the car is, copy it, and keep it in a list (localStorage "marks"). */
+  const markSpot = () => {
+    const at = player.body.translation();
+    const text = spot(new THREE.Vector3(at.x, at.y, at.z));
+    let count = 1;
+    try {
+      const marks = JSON.parse(localStorage.getItem('marks') ?? '[]') as string[];
+      marks.push(`${new Date().toISOString()} ${text}`);
+      localStorage.setItem('marks', JSON.stringify(marks));
+      count = marks.length;
+    } catch { /* storage unavailable: the note and the clipboard still have it */ }
+    void navigator.clipboard?.writeText(text).catch(() => {});
+    console.log('MARK', text);
+    hud.note(`📍 ${text} · copied · mark ${count}`, 'info');
+  };
+
   const place = (position: THREE.Vector3, yaw: number) => {
     player.reset(position, yaw);
     skids.breakAll();
@@ -384,6 +406,7 @@ async function main(): Promise<void> {
       hud.note(labels[mode] ?? `CAMERA: ${mode.toUpperCase()}`, 'stunt');
     }
     if (actions.fps) hud.toggleFps();
+    if (actions.mark) markSpot();
     if (actions.help) hud.toggleHelp();
 
     // Events start with a fresh car
@@ -491,7 +514,8 @@ async function main(): Promise<void> {
     fps.frames++;
     if (now - fps.since > 500) {
       const perSecond = (fps.frames * 1000) / (now - fps.since);
-      fps.text = `${perSecond.toFixed(0)} fps · ${(1000 / perSecond).toFixed(1)} ms`;
+      const at = player.body.translation();
+      fps.text = `${perSecond.toFixed(0)} fps · ${(1000 / perSecond).toFixed(1)} ms · ${spot(new THREE.Vector3(at.x, at.y, at.z))}`;
       fps.frames = 0;
       fps.since = now;
     }
