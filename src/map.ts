@@ -934,7 +934,7 @@ export class GameMap {
   private async makeMaterial(i: number, shaded: boolean): Promise<THREE.Material> {
     const m = this.manifest.materials[i];
     // A replacement scan for a low-resolution texture (retexture.ts)
-    const re = await retextureOf(this.id, m.diffuse);
+    const re = await retextureOf(this.id, m.diffuse, m.shader);
     if (re) {
       const mat = await retextureMaterial(re);
       litMaterials.add(mat);

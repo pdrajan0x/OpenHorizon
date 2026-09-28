@@ -58,6 +58,8 @@ static class MapWriter
     {
         public int Index;
         public string Shader = "", Diffuse, Normal, Spec;
+        // GTA's layered terrain shaders (terrain_cb_*): the textures of layers 0–3, blended by vertex colour in the game
+        public string[] Layers;
         public bool Emissive, Blend, Mask;
         // GTA's specular controls: how strong (specularIntensityMult), how tight (specularFalloffMult),
         // and the normal map's strength (bumpiness); NaN where the shader doesn't set them
@@ -603,6 +605,7 @@ static class MapWriter
                     if (m.Diffuse != null) cellTex.Add(m.Diffuse);
                     if (m.Normal != null) cellTex.Add(m.Normal);
                     if (m.Spec != null) cellTex.Add(m.Spec);
+                    foreach (var l in m.Layers ?? []) if (l != null) cellTex.Add(l);
                     for (int i = 0; i < b.Pos.Count; i += 3)
                     {
                         var p = new Vector3(b.Pos[i], b.Pos[i + 1], b.Pos[i + 2]);
@@ -667,6 +670,7 @@ static class MapWriter
                 ["emissive"] = m.Emissive, ["blend"] = m.Blend, ["mask"] = m.Mask,
             };
             if (m.Spec != null && !missingTex.Contains(m.Spec)) o["spec"] = Safe(m.Spec);
+            if (m.Layers != null) o["layers"] = new JsonArray(m.Layers.Select(l => (JsonNode)(l != null && !missingTex.Contains(l) ? Safe(l) : null)).ToArray());
             if (!float.IsNaN(m.SpecIntensity)) o["specIntensity"] = MathF.Round(m.SpecIntensity, 3);
             if (!float.IsNaN(m.SpecFalloff)) o["specFalloff"] = MathF.Round(m.SpecFalloff, 1);
             if (!float.IsNaN(m.Bumpiness)) o["bump"] = MathF.Round(m.Bumpiness, 3);
@@ -785,6 +789,7 @@ static class MapWriter
     {
         var shader = ShaderNames.Of(s);
         string diffuse = null, normal = null, spec = null;
+        var layers = new string[4];
         float specIntensity = float.NaN, specFalloff = float.NaN, bumpiness = float.NaN;
         var pl = s?.ParametersList;
         for (int i = 0; i < (pl?.Parameters?.Length ?? 0); i++)
@@ -798,16 +803,22 @@ static class MapWriter
                 continue;
             }
             if (pl.Parameters[i].Data is not TextureBase tb || string.IsNullOrEmpty(tb.Name)) continue;
+            var lm = System.Text.RegularExpressions.Regex.Match(p, @"^texturesampler_layer([0-3])$");
+            if (lm.Success) { layers[lm.Groups[1].Value[0] - '0'] = tb.Name; continue; }
             if (p == "diffusesampler" || (diffuse == null && p.Contains("diffuse"))) diffuse = tb.Name;
             else if (p == "bumpsampler" && !tb.Name.Contains("blank")) normal = tb.Name;
             else if (p == "specsampler" && !tb.Name.Contains("blank")) spec = tb.Name;
         }
-        var key = $"{shader}|{diffuse}|{normal}|{spec}|{specIntensity}|{specFalloff}|{bumpiness}";
+        // A terrain shader without a diffuse: its base layer is its colour
+        bool layered = layers.Any(l => l != null);
+        diffuse ??= layered ? layers.FirstOrDefault(l => l != null) : null;
+        var key = $"{shader}|{diffuse}|{normal}|{spec}|{specIntensity}|{specFalloff}|{bumpiness}|{string.Join(",", layers)}";
         if (materials.TryGetValue(key, out var m)) return m;
         m = new MaterialInfo
         {
             Index = materials.Count, Shader = shader, Diffuse = diffuse, Normal = normal, Spec = spec,
             SpecIntensity = specIntensity, SpecFalloff = specFalloff, Bumpiness = bumpiness,
+            Layers = layered ? layers : null,
             Emissive = shader.Contains("emissive"),
             Blend = shader.Contains("alpha") || shader.Contains("decal") || shader.Contains("glass"),
             Mask = shader.Contains("cutout") || shader.Contains("trees") || shader.Contains("grass"),
