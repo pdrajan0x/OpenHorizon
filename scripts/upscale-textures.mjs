@@ -218,7 +218,7 @@ for (const id of process.argv.slice(2).filter((a) => !a.startsWith('--'))) {
   console.log(`${id}: ${jobs.length} textures to remaster, ${queued} through Real-ESRGAN`);
   if (!jobs.length) continue;
   if (queued) {
-    execFileSync(ESRGAN, ['-i', `${work}/src`, '-o', `${work}/out`, '-n', 'realesrgan-x4plus', '-s', '4', '-f', 'png'], {
+    execFileSync(ESRGAN, ['-i', `${work}/src`, '-o', `${work}/out`, '-n', 'realesrgan-x4plus', '-s', '4', '-f', 'png', '-j', process.env.ESRGAN_THREADS ?? '4:4:4'], {
       env: GPU_ENV, cwd: '.', stdio: ['ignore', 'ignore', 'ignore'],
     });
   }
