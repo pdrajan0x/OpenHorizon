@@ -408,6 +408,7 @@ export class Islands {
         corridors.add([plans[b.plan.a].nodes[b.plan.na], ...b.nodes, plans[b.plan.b].nodes[b.plan.nb]],
           [b.endHalf[0], ...b.halfWidths, b.endHalf[1]].map((h) => h + 1.5));
       }
+      console.log(`bridge piers: ${bridges.pierStats[0]} as planned, ${bridges.pierStats[1]} moved off a road, ${bridges.pierStats[2]} left out`);
       console.log(`bridges: ${bridges.bridges.length}`, bridges.bridges.map((b) =>
         `${shaped[b.plan.a].info.id}↔${shaped[b.plan.b].info.id} ${b.length.toFixed(0)} m`).join(', '));
     }

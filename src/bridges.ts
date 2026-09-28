@@ -63,6 +63,7 @@ const EMBANK_SLOPE = 1.5; // m out per m down
 const HIGH_OVER_LAND = 8; // m: a deck higher than this over land stands on piers, lower on the ground
 const FILL_FROM = 1.5; // m: a deck this high over land or more has rock slopes down to the ground
 const SPAN = 50; // m between piers
+const PIER_ROAD_CLEAR = 6; // m from a city road's line at least, for a pier's columns
 const FOOTING_TOP = 1.2; // m: a pier's footing stands this far out of the water
 const SEABED = -18; // m, where piers end
 const BARRIER_HEIGHT = 1.1; // m, the collision wall along each edge
@@ -783,6 +784,39 @@ function groundAt(islands: IslandPlan[], landAt?: (x: number, z: number) => numb
   };
 }
 
+/** A lookup: is any island road link within r m (in plan) of a point. */
+function roadLookup(islands: IslandPlan[]): (x: number, z: number, r: number) => boolean {
+  const G = 40;
+  const grid = new Map<string, [THREE.Vector3, THREE.Vector3][]>();
+  for (const isl of islands) {
+    isl.adjacent.forEach((adj, i) => {
+      for (const { other } of adj) {
+        if (other < i) continue;
+        const a = isl.nodes[i];
+        const b = isl.nodes[other];
+        for (let gx = Math.floor(Math.min(a.x, b.x) / G); gx <= Math.floor(Math.max(a.x, b.x) / G); gx++) {
+          for (let gz = Math.floor(Math.min(a.z, b.z) / G); gz <= Math.floor(Math.max(a.z, b.z) / G); gz++) {
+            const key = `${gx},${gz}`;
+            const l = grid.get(key);
+            if (l) l.push([a, b]); else grid.set(key, [[a, b]]);
+          }
+        }
+      }
+    });
+  }
+  return (x, z, r) => {
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      for (const [a, b] of grid.get(`${Math.floor(x / G) + i},${Math.floor(z / G) + j}`) ?? []) {
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
+        if (Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < r) return true;
+      }
+    }
+    return false;
+  };
+}
+
 /**
  * Each link's deck, in the planner's order: where it leaves each street and in which direction, how wide
  * each end is, its bend (chooseBend: the later bridges keep clear of the earlier) and its frames. Pure
@@ -830,6 +864,10 @@ export class BridgeNetwork {
   readonly root = new THREE.Group();
   readonly bridges: Bridge[] = [];
   private readonly detail: { mesh: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
+  /** Whether a city road runs within `r` m of a point (piers keep off the streets under a bridge). */
+  private roadNear: (x: number, z: number, r: number) => boolean = () => false;
+  /** Piers placed where planned, moved off a road, left out (none clear). */
+  readonly pierStats = [0, 0, 0];
 
   private constructor(
     world: RAPIER.World,
@@ -842,6 +880,7 @@ export class BridgeNetwork {
     this.root.name = 'bridges';
     const sea = (x: number, z: number) => (landAt ? landAt(x, z) < 0 : true);
     const ground = groundAt(islands, landAt);
+    this.roadNear = roadLookup(islands);
     for (const { plan, frames, endHalf } of layBridges(islands, plans, landAt)) {
       const length = frames[frames.length - 1].s;
       const nodes: THREE.Vector3[] = [];
@@ -1144,8 +1183,19 @@ export class BridgeNetwork {
       const s1 = frames[Math.min(last, r.i1 + 1)].s;
       const spans = Math.max(1, Math.round((s1 - s0) / SPAN));
       for (let k = 1; k < spans; k++) {
-        const f = frameAt(frames, s0 + ((s1 - s0) * k) / spans);
-        if (f.s < 20 || f.s > frames[last].s - 20) continue; // on the street there
+        const at = s0 + ((s1 - s0) * k) / spans;
+        // Off any street under the bridge: the nearest spot along it (PIER_SHIFT m either way) where the
+        // columns stand clear of the roads, or no pier here (its neighbours span the gap)
+        let f: Frame | null = null;
+        for (const d of [0, 8, -8, 16, -16, 24, -24]) {
+          if (Math.abs(d) >= (s1 - s0) / spans / 2) continue;
+          const g = frameAt(frames, at + d - frames[0].s);
+          const half = boxHalf(g.hw) * 0.62 + 2.5;
+          const clear = [-half, 0, half].every((x) => !this.roadNear(g.p.x + g.r.x * x, g.p.z + g.r.z * x, PIER_ROAD_CLEAR));
+          if (clear) { f = g; break; }
+        }
+        this.pierStats[f ? (f.s === frameAt(frames, at - frames[0].s).s ? 0 : 1) : 2]++;
+        if (!f || f.s < 20 || f.s > frames[last].s - 20) continue; // on the street there
         piers.push(f);
       }
     }
