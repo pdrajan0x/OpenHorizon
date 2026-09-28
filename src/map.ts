@@ -5,6 +5,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { Markings } from './markings';
+import { retextureMaterial, retextureOf } from './retexture';
 import { surfaceMaterial, surfaceOf } from './roadSurface';
 import type { Corridors } from './corridors';
 import { EFFECTS } from './quality';
@@ -337,6 +338,7 @@ export class GameMap {
   readonly roads: RoadGraph;
   readonly roadData: RoadData; // in world space (offset applied), for merging islands' graphs
   private roadGrid: Map<string, number[]> | null = null;
+  private readonly collisionJobs = new Map<number, Promise<void>>();
   /** Painted lines for a map without its own (markings.ts). */
   markings: Markings | null = null;
   readonly spawn: THREE.Vector3;
@@ -454,7 +456,7 @@ export class GameMap {
     const jobs: Promise<void>[] = [];
     for (const c of this.manifest.cells) {
       const d = this.distance(c, at);
-      if (c.collision && d < COLLISION_RADIUS) jobs.push(this.loadCollision(c));
+      if ((c.collision || (c.render && SURFACE_COLLISION_MAPS.test(this.id))) && d < COLLISION_RADIUS) jobs.push(this.loadCollision(c));
       if (c.render && d < RENDER_RADIUS * 0.5) jobs.push(this.loadCell(c));
     }
     await Promise.all(jobs);
@@ -789,7 +791,15 @@ export class GameMap {
     return new THREE.BufferAttribute(out, 1);
   }
 
-  private async loadCollision(c: CellInfo): Promise<void> {
+  /** A cell's collision, loading or loaded: callers that need it in place (prime) wait on the same load. */
+  private loadCollision(c: CellInfo): Promise<void> {
+    if (this.colliders.has(c.id)) return this.collisionJobs.get(c.id) ?? Promise.resolve();
+    const job = this.buildCollision(c).finally(() => this.collisionJobs.delete(c.id));
+    this.collisionJobs.set(c.id, job);
+    return job;
+  }
+
+  private async buildCollision(c: CellInfo): Promise<void> {
     if (this.colliders.has(c.id)) return;
     this.colliders.set(c.id, 'loading');
     // A cell with nothing solid of its own (collision false) may still have road to make solid
@@ -923,6 +933,14 @@ export class GameMap {
 
   private async makeMaterial(i: number, shaded: boolean): Promise<THREE.Material> {
     const m = this.manifest.materials[i];
+    // A replacement scan for a low-resolution texture (retexture.ts)
+    const re = await retextureOf(this.id, m.diffuse);
+    if (re) {
+      const mat = await retextureMaterial(re);
+      litMaterials.add(mat);
+      applyLighting(mat);
+      return mat;
+    }
     // The city's roads and footpaths: the shared materials (roadSurface.ts), not the map's own
     const surface = await surfaceOf(this.id, m.diffuse);
     if (surface) {

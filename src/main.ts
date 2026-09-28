@@ -230,11 +230,18 @@ async function main(): Promise<void> {
     hud.note(`📍 ${text} · copied · mark ${count}`, 'info');
   };
 
+  // After the car is put somewhere, it's held there until something solid is under it: a city's collision
+  // can stream in after its drawing (Town 12's is built from its road meshes), and the car would fall through
+  let awaitGround: { at: THREE.Vector3; yaw: number; since: number } | null = null;
+  const GROUND_WAIT = 20; // s at most
   const place = (position: THREE.Vector3, yaw: number) => {
     player.reset(position, yaw);
     skids.breakAll();
     cam.snap();
+    awaitGround = { at: position.clone(), yaw, since: performance.now() };
   };
+  const groundUnder = (p: THREE.Vector3) => world.castRay(new RAPIER.Ray({ x: p.x, y: p.y + 3, z: p.z }, { x: 0, y: -1, z: 0 }), 12, true,
+    RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, undefined, player.body) !== null;
 
   const resetPlayer = () => {
     const p = player.body.translation();
@@ -453,6 +460,10 @@ async function main(): Promise<void> {
       world.timestep = h;
       const p = player.body.translation();
       playerPos.set(p.x, p.y, p.z);
+      if (awaitGround) {
+        if (groundUnder(awaitGround.at) || performance.now() - awaitGround.since > GROUND_WAIT * 1000) awaitGround = null;
+        else player.reset(awaitGround.at, awaitGround.yaw);
+      }
       player.fixedUpdate(drive, h);
       const speedBefore = player.speed;
       player.markVelocity();

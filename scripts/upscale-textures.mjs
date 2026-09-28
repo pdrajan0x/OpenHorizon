@@ -5,11 +5,12 @@
 // Re-running skips textures already done (public/mods/maps/<id>/upscaled.json); --redo does them again.
 // Only the full-size level is new: the mips below it are the original texture's, so it never looks softer.
 // Usage: node scripts/upscale-textures.mjs <mapId> [...] [--redo]   (needs ImageMagick)
+//   MAX_SOURCE=1024 ONLY='apartment|skyscraper' …   bigger sources, and only the textures named
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const MAX_SOURCE = 512; // px, longest edge: bigger textures are sharp enough as they are
+const MAX_SOURCE = Number(process.env.MAX_SOURCE ?? 512); // px, longest edge: bigger textures are sharp enough as they are
 const MIN_SOURCE = 64; // px: smaller ones are tiling detail, left alone
 const TARGET = 2; // × the original size
 const ESRGAN = 'tools/vendor/realesrgan/realesrgan-ncnn-vulkan';
@@ -189,7 +190,9 @@ for (const id of process.argv.slice(2).filter((a) => !a.startsWith('--'))) {
   const doneFile = `${dir}/upscaled.json`;
   const done = new Set(!redo && fs.existsSync(doneFile) ? JSON.parse(fs.readFileSync(doneFile, 'utf8')) : []);
   const manifest = JSON.parse(fs.readFileSync(`${dir}/manifest.json`, 'utf8'));
-  const names = [...new Set(manifest.materials.map((m) => m.diffuse).filter(Boolean))].filter((n) => !done.has(n));
+  // ONLY=<regex>: just the textures it matches (e.g. a city's building fronts)
+  const only = process.env.ONLY ? new RegExp(process.env.ONLY, 'i') : null;
+  const names = [...new Set(manifest.materials.map((m) => m.diffuse).filter(Boolean))].filter((n) => !done.has(n) && (!only || only.test(n)));
   const jobs = [];
   for (const name of names) {
     const file = `${dir}/tex/${name}.gtx`;

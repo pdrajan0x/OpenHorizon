@@ -143,6 +143,8 @@ rights holders).
 - [Shanghai Bund (night city HDRI)](https://polyhaven.com/a/shanghai_bund) by Poly Haven (CC0)
 - [Google Maps San Francisco Golden Gate Bridge](https://www.gta5-mods.com/maps/google-maps-san-francisco-golden-gate-bridge) by FV Mods
 
+- Town 12's ground, cliffs and grass: Poly Haven scans (CC0) withered_grass, rock_face_03, leafy_grass, sparse_grass (public/mods/retex/, applied by public/mods/maps/carla-town12/retexture.json); its building fronts upscaled with Real-ESRGAN
+
 ## Tools
 
 - [CodeWalker](https://github.com/dexyfex/CodeWalker) by dexyfex: GTA V file formats (used by `tools/gta5conv`)
