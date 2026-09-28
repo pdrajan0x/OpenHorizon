@@ -8,7 +8,11 @@ for (const id of ids) {
   const d = `public/mods/maps/${id}`;
   const m = JSON.parse(fs.readFileSync(`${d}/manifest.json`));
   const ok = (n) => { try { const b = Buffer.alloc(4); const h = fs.openSync(`${d}/tex/${n}.gtx`, 'r'); fs.readSync(h, b, 0, 4, 0); fs.closeSync(h); return b.toString() === 'GTX1'; } catch { return false; } };
-  const bad = m.materials.map((x) => (/water|shadow_proxy/.test(x.shader) ? null : !x.diffuse ? 'no texture' : ok(x.diffuse) ? null : 'texture file missing'));
+  // Covered already: a replacement in retexture.json (by #index, texture or shader); not meant to have one:
+  // water, glass, GTA's shadow casters and its untextured stand-in shells (cpv_only)
+  const re = fs.existsSync(`${d}/retexture.json`) ? JSON.parse(fs.readFileSync(`${d}/retexture.json`)) : {};
+  const bad = m.materials.map((x, i) => (/water|shadow_proxy|glass|cpv_only|carwindows/.test(x.shader) || re[`#${i}`] || (x.diffuse && re[x.diffuse]) || (!x.diffuse && re[`shader:${x.shader}`]) ? null
+    : !x.diffuse ? 'no texture' : ok(x.diffuse) ? null : 'texture file missing'));
   const acc = new Map();
   for (const c of m.cells) {
     if (!c.render) continue;
