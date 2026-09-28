@@ -1077,8 +1077,15 @@ function decodeGtx(buf: ArrayBuffer, color: boolean): THREE.Texture | null {
       offset += size;
     }
     if (!mipmaps.length) return null; // cut short: nothing to upload
+    // WebGL refuses compressed sizes that aren't multiples of 4 (a few mod textures, e.g. 199x515): the
+    // blocks already cover the rounded-up size, so declare that and keep only the top level
+    if (width % 4 || height % 4) {
+      mipmaps.length = 1;
+      mipmaps[0].width = Math.ceil(width / 4) * 4;
+      mipmaps[0].height = Math.ceil(height / 4) * 4;
+    }
     const fmt = format === 1 ? THREE.RGBA_S3TC_DXT1_Format : format === 3 ? THREE.RGBA_S3TC_DXT3_Format : THREE.RGBA_S3TC_DXT5_Format;
-    texture = new THREE.CompressedTexture(mipmaps as unknown as ImageData[], width, height, fmt);
+    texture = new THREE.CompressedTexture(mipmaps as unknown as ImageData[], mipmaps[0].width, mipmaps[0].height, fmt);
     texture.minFilter = mipmaps.length > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
   }
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
