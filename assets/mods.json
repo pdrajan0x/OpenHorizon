@@ -1744,5 +1744,60 @@
     "format": "GTA V add-on vehicle",
     "notes": "Rating 4.52, 6,618 downloads.",
     "archiveBytes": 11264111
+  },
+  {
+    "id": "audio-bike-bmw-i4",
+    "category": "audio",
+    "title": "BMW S1000RR I4 Sound Mod [SP Add-On | FiveM]",
+    "author": "Legacy_DMC",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/bmw-s1000rr-i4-sound-mod-sp-add-on-fivem",
+    "fileUrl": "https://files.gta5-mods.com/uploads/bmw-s1000rr-i4-sound-mod-sp-add-on-fivem/658c32-BMWS1000RRJanuary7LegacyDmc.rar",
+    "format": "GTA V add-on engine sound",
+    "notes": "Rating 4.93, 12,810 downloads.",
+    "archiveBytes": 2915039
+  },
+  {
+    "id": "audio-bike-ducati-v4",
+    "category": "audio",
+    "title": "Ducati Panigale V4 R Engine Sound Mod [Add-On / FiveM]",
+    "author": "KCMIR0",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/ducati-panigale-v4-engine-sound-mod",
+    "fileUrl": "https://files.gta5-mods.com/uploads/ducati-panigale-v4-engine-sound-mod/c35a75-Ducati%20Panigale%20V4%20Engine%20Sound%20Mod%20by%20KCMIR0%232013.zip",
+    "format": "GTA V add-on engine sound",
+    "notes": "Rating 4.56, 11,863 downloads.",
+    "archiveBytes": 6975603
+  },
+  {
+    "id": "audio-bike-kawasaki-h2r",
+    "category": "audio",
+    "title": "Kawasaki Ninja H2R Engine Sound [OIV Add-On | FiveM]",
+    "author": "TheAdmiester",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/kawasaki-ninja-h2r-engine-sound-oiv-add-on-fivem",
+    "fileUrl": "https://files.gta5-mods.com/uploads/kawasaki-ninja-h2r-engine-sound-oiv-add-on-fivem/1ec6ce-Kawasaki%20Ninja%20H2R%20Engine%20Sound.zip",
+    "format": "GTA V add-on engine sound",
+    "notes": "Rating 5, 5,495 downloads.",
+    "archiveBytes": 8110981
+  },
+  {
+    "id": "audio-bike-yamaha-r1",
+    "category": "audio",
+    "title": "Yamaha YZF-R1 Engine Sound [OIV Addon | FiveM]",
+    "author": "TheAdmiester",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/yamaha-yzf-r1-engine-sound-oiv-addon-fivem",
+    "fileUrl": "https://files.gta5-mods.com/uploads/yamaha-yzf-r1-engine-sound-oiv-addon-fivem/2224ff-Yamaha%20YZF-R1%20Engine%20Sound.zip",
+    "format": "GTA V add-on engine sound",
+    "notes": "Rating 4.94, 10,019 downloads.",
+    "archiveBytes": 7189417
+  },
+  {
+    "id": "audio-bike-harley",
+    "category": "audio",
+    "title": "Harley Davidson - Engine Sound",
+    "author": "fran1238",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/harley-davidson-engine-sound-fran1238",
+    "fileUrl": "https://files.gta5-mods.com/uploads/harley-davidson-engine-sound-fran1238/cd6636-harleyengine.rar",
+    "format": "GTA V add-on engine sound",
+    "notes": "Rating 4.93, 563 downloads.",
+    "archiveBytes": 3329106
   }
 ]

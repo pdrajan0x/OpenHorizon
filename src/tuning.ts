@@ -11,6 +11,8 @@ export interface CarTuning {
   underglow?: number;
   makeVisual: (t: CarTuning) => CarVisual; // the car's model, from a GTA V mod
   engineSound?: string; // engine sound set in public/mods/audio
+  bike?: boolean; // a motorbike: leans into turns, kept upright by the physics
+  maxLean?: number; // rad a motorbike leans at most (a cruiser scrapes sooner than a superbike)
 
   mass: number;
   centerOfMassHeight: number; // above the ground; lower = harder to roll over

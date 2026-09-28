@@ -15,6 +15,8 @@ export interface CarShape {
 
 export interface CarVisual extends CarShape {
   root: THREE.Group;
+  /** Motorbikes: everything drawn hangs under this, which leans into turns (the physics stays upright). */
+  lean: THREE.Group | null;
   /** Front-left, front-right, rear-left, rear-right. `center` is the wheel center at ride height. */
   wheels: { steer: THREE.Group; spin: THREE.Group; center: THREE.Vector3 }[];
   /** Driver's-eye point for the cockpit camera. */
@@ -62,12 +64,27 @@ export function loadModCar(url: string): Promise<Template> {
 }
 
 /** A drivable visual from a loaded template: own materials (for paint and lights), shared geometry. */
+/** m between a motorbike's physics wheels side by side (the drawn wheel sits between them). */
+export const BIKE_TRACK = 0.5;
+
 export function modCarVisual(t: Template, look: CarLook): CarVisual {
-  const root = new THREE.Group();
+  const outer = new THREE.Group();
   const model = t.scene.clone(true);
   model.position.y = t.lift;
-  root.add(model);
+  outer.add(model);
   model.updateMatrixWorld(true);
+  // A motorbike: only a front and a rear wheel (GTA's wheel_lf and wheel_lr)
+  const names = new Set<string>();
+  model.traverse((o) => names.add(o.name));
+  const bike = names.has('wheel_lf') && names.has('wheel_lr') && !names.has('wheel_rf') && !names.has('wheel_rr');
+  // What leans: the whole drawing, round the line where the tyres meet the road
+  const lean = bike ? new THREE.Group() : null;
+  const root = lean ?? outer;
+  if (lean) {
+    outer.remove(model);
+    lean.add(model);
+    outer.add(lean);
+  }
 
   const paint = new THREE.MeshPhysicalMaterial({
     color: look.paint, metalness: 0.6, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.06,
@@ -120,19 +137,24 @@ export function modCarVisual(t: Template, look: CarLook): CarVisual {
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => swap(m, part)) : swap(mesh.material, part);
   });
 
-  // Re-hang each wheel under steer → spin groups centered on its hub, as the physics sync expects
+  // Re-hang each wheel under steer → spin groups centered on its hub, as the physics sync expects. A bike's
+  // physics has four wheels too, in two narrow pairs; its one real wheel of each pair is drawn between them
   const wheels = WHEELS.map((name) => {
-    const node = wheelNodes.get(name);
+    const own = bike ? (name === 'wheel_rf' ? 'wheel_lf' : name === 'wheel_rr' ? 'wheel_lr' : name) : name;
+    const node = wheelNodes.get(own);
     const center = new THREE.Vector3();
     const steer = new THREE.Group();
     const spin = new THREE.Group();
     steer.add(spin);
     root.add(steer);
-    if (node) {
-      node.getWorldPosition(center);
+    if (node) node.getWorldPosition(center);
+    const side = bike ? (name === 'wheel_lf' || name === 'wheel_lr' ? 1 : -1) : 0;
+    if (node && (!bike || side > 0)) {
       spin.add(node);
-      node.position.set(0, 0, 0);
+      // Along the axle, back to the middle: spinning about the axle leaves it there
+      node.position.set(0, 0, -side * BIKE_TRACK / 2);
     }
+    center.z += (side * BIKE_TRACK) / 2;
     steer.position.copy(center);
     return { steer, spin, center };
   });
@@ -150,7 +172,8 @@ export function modCarVisual(t: Template, look: CarLook): CarVisual {
     : new THREE.Vector3(0, box.max.y - 0.25, -0.35);
 
   return {
-    root,
+    root: outer,
+    lean,
     wheels,
     eye,
     wheelRadius: t.wheelRadius,

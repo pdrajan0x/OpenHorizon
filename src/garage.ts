@@ -27,12 +27,21 @@ const CARS = [
   { id: 'muscle-challenger-70', paint: 0x5b2a86, engine: 'muscle-v8' },
   { id: 'muscle-mustang-boss-69', paint: 0xe9e6dc, engine: 'corvette-v8' },
   { id: 'muscle-gto-judge-69', paint: 0xe25a1c, engine: 'corvette-v8' },
+  // Motorbikes, each with its own engine: Ducati's V4, BMW's and Yamaha's inline fours, the supercharged
+  // H2R, and a Harley V-twin for both Harleys
+  { id: 'bike-ducati-v4', paint: 0xc8102e, engine: 'bike-v4' },
+  { id: 'bike-bmw-m1000rr', paint: 0xe8ebef, engine: 'bike-i4' },
+  { id: 'bike-kawasaki-h2r', paint: 0x2b2d30, engine: 'bike-h2r' },
+  { id: 'bike-yamaha-r1m', paint: 0x1f3fa8, engine: 'bike-r1' },
+  { id: 'bike-harley-street-glide', paint: 0x6b0f16, engine: 'bike-vtwin', maxLean: 0.55 },
+  { id: 'bike-harley-fat-boy', paint: 0xb8bcc2, engine: 'bike-vtwin', maxLean: 0.55 },
 ];
 
 interface Spec {
   id: string;
   name: string;
   make: string;
+  bike?: boolean;
   handling: {
     mass?: number;
     driveBiasFront?: number;
@@ -49,7 +58,7 @@ const heroTemplates = new Map<string, Template>();
 const lodTemplates = new Map<string, Template>();
 
 /** GTA handling units → the arcade model. GTA values are tuned for its own physics, so clamp to what drives well here. */
-function tuningFor(spec: Spec, paint: number, engine: string, template: () => Template): CarTuning {
+function tuningFor(spec: Spec, paint: number, engine: string, template: () => Template, maxLean?: number): CarTuning {
   const h = spec.handling ?? {};
   const mass = clamp(h.mass ?? 1500, 1100, 2300);
   const bias = h.driveBiasFront ?? 0.3;
@@ -63,6 +72,8 @@ function tuningFor(spec: Spec, paint: number, engine: string, template: () => Te
     className: spec.make,
     paint,
     engineSound: engine,
+    bike: spec.bike ?? false,
+    maxLean,
     makeVisual: (t) => modCarVisual(template(), { paint: t.paint }),
     mass,
     centerOfMassHeight: 0.44,
@@ -97,8 +108,9 @@ export async function loadGarage(first = 0): Promise<void> {
   const specs = await Promise.all(CARS.map((c) => fetch(`/mods/cars/${c.id}.json`).then((r) => r.json() as Promise<Spec>)));
   await Promise.all(CARS.map(async (c) => lodTemplates.set(c.id, await loadModCar(`/mods/cars/${c.id}_lod.glb`))));
   CARS.forEach((c, i) => {
-    GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => heroTemplates.get(c.id) ?? lodTemplates.get(c.id)!));
-    RIVAL_GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => lodTemplates.get(c.id)!));
+    const lean = 'maxLean' in c ? c.maxLean : undefined;
+    GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => heroTemplates.get(c.id) ?? lodTemplates.get(c.id)!, lean));
+    RIVAL_GARAGE.push(tuningFor(specs[i], c.paint, c.engine, () => lodTemplates.get(c.id)!, lean));
   });
   await ensureHero(first);
 }

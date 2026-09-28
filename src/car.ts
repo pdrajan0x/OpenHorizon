@@ -19,6 +19,11 @@ const WORN_TOP_SPEED = 0.35; // share of top speed lost
 const WORN_PULL = 0.05; // rad/s of steering drift at full wear
 
 const AIR_LEVELING = 2500; // N·m per radian of tilt while airborne
+// Motorbikes (tuning.bike): the body is held upright (per s², × its inertia), what's drawn leans
+const BIKE_UPRIGHT = 60;
+const BIKE_UPRIGHT_DAMPING = 15;
+const BIKE_MAX_LEAN = 0.85; // rad
+const BIKE_LEAN_RATE = 6; // how fast the lean follows, per s
 // Steering lock falls off with speed as limit = maxSteer / (1 + (v / STEER_FALLOFF)^STEER_FALLOFF_POWER):
 // full lock for parking, a calm few degrees on the highway (the tires couldn't use more anyway)
 const STEER_FALLOFF = 20; // m/s
@@ -64,6 +69,7 @@ export class Car {
 
   private steerAngle = 0;
   private readonly wheelbase: number;
+  private leanAngle = 0;
   private readonly yawInertia: number;
   private pull = 0; // steering bias a bent chassis gives, -1..1 (set by the first real hit)
   private prevSlip = 0;
@@ -220,6 +226,7 @@ export class Car {
     }
 
     if (!drifting && !c.handbrake && grounded && this.speed > 8) this.stabilize(dt);
+    if (this.visual.lean) this.ride(dt, grounded);
 
     const slipRate = (this.slip - this.prevSlip) / dt;
     this.prevSlip = this.slip;
@@ -256,6 +263,24 @@ export class Car {
     const sliding = drifting ? Math.min(1, Math.abs(this.slip) / 0.6) : 0;
     const locking = (c.handbrake || this.braking) && this.speed > 5 ? 0.6 : 0;
     this.skidAmount = grounded ? Math.max(sliding, locking) : 0;
+  }
+
+  /**
+   * A motorbike: the physics body is kept upright by a roll spring (its wheels are in narrow pairs), and
+   * what's drawn leans into the turn by the angle that balances it: tan(lean) = speed × yaw rate / g.
+   */
+  private ride(dt: number, grounded: boolean): void {
+    // Roll: about the forward axis, positive with the top toward the right (+z); the right vector then dips
+    const roll = -this.right.y;
+    const w = this.body.angvel();
+    const rollRate = w.x * this.forward.x + w.y * this.forward.y + w.z * this.forward.z;
+    const torque = (-BIKE_UPRIGHT * roll - BIKE_UPRIGHT_DAMPING * rollRate) * this.yawInertia;
+    this.body.applyTorqueImpulse(this.tmp.copy(this.forward).multiplyScalar(torque * dt), true);
+    const yawRate = w.y;
+    const want = grounded ? THREE.MathUtils.clamp(Math.atan((this.forwardSpeed * yawRate) / GRAVITY), -(this.tuning.maxLean ?? BIKE_MAX_LEAN), this.tuning.maxLean ?? BIKE_MAX_LEAN) : this.leanAngle * 0.9;
+    this.leanAngle += (want - this.leanAngle) * (1 - Math.exp(-dt * BIKE_LEAN_RATE));
+    // Turning left (+yaw rate) leans left: a negative roll about the forward axis
+    this.visual.lean!.rotation.x = -this.leanAngle;
   }
 
   /**

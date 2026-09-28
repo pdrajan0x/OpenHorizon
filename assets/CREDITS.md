@@ -95,6 +95,13 @@ rights holders).
 - [Better Crash Sounds (BeamNG.drive)](https://www.beamng.com/resources/better-crash-sounds-completed.2554/) by Sugarking22795
 - [Alpha - Crash Sound Mod (BeamNG.drive)](https://www.beamng.com/resources/crash-sound-mod.2984/) by DriftTuner
 
+- [BMW S1000RR I4 Sound Mod](https://www.gta5-mods.com/vehicles/bmw-s1000rr-i4-sound-mod-sp-add-on-fivem) by Legacy_DMC
+- [Ducati Panigale V4 R Engine Sound Mod](https://www.gta5-mods.com/vehicles/ducati-panigale-v4-engine-sound-mod) by KCMIR0 (sounds: Rims Racing, RaceWard Studio)
+- [Kawasaki Ninja H2R Engine Sound](https://www.gta5-mods.com/vehicles/kawasaki-ninja-h2r-engine-sound-oiv-add-on-fivem) by TheAdmiester
+- [Yamaha YZF-R1 Engine Sound](https://www.gta5-mods.com/vehicles/yamaha-yzf-r1-engine-sound-oiv-addon-fivem) by TheAdmiester
+- [Harley Davidson - Engine Sound](https://www.gta5-mods.com/vehicles/harley-davidson-engine-sound-fran1238) by fran1238
+- Muscle V8s: the Dodge Charger SRT Hellcat and Corvette ZR1 sounds from PeaceOne's Real Sounds Mod (above)
+
 ## Vegetation, buildings and props
 
 - [Million Trees](https://www.gta5-mods.com/maps/million-trees) by (gta5-mods, Infinite Question Discord)

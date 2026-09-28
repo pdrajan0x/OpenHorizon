@@ -16,9 +16,7 @@ try {
   await page.goto(server.resolvedUrls.local[0] + '?debug&traffic=0', { timeout: 300_000, waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window.__game?.simTime ?? 0) > 2, null, { timeout: 300_000 });
   await page.addStyleTag({ content: '#hud, #help { display: none !important; }' });
-  const count = await page.evaluate(() => document.querySelectorAll('.menu-item').length || 0);
-  void count;
-  for (let n = 0; n < 12; n++) {
+  for (let n = 0; n < Number(process.env.COUNT ?? 18); n++) {
     if (n < 9) await page.keyboard.press(`Digit${n + 1}`);
     else {
       // The pause menu: Switch car, then down from the current car to this one
@@ -44,6 +42,19 @@ try {
     await page.screenshot({ path: `${out}/car-${n + 1}.png` });
     await page.evaluate(() => { window.__debug.cam.view = null; });
     console.log(`${out}/car-${n + 1}.png ${car}`);
+  }
+  // Then ride the last one: full throttle, steering left for 4 s; is it upright, leaning, fast?
+  if (process.env.RIDE) {
+    await page.evaluate(() => { window.__debug.cam.mode = 'chase'; });
+    await page.keyboard.down('KeyW');
+    await settle(2);
+    await page.keyboard.down('KeyA');
+    await settle(1.5);
+    await page.screenshot({ path: `${out}/ride-turn.png` });
+    const s = await page.evaluate(() => ({ kmh: window.__game.speedKmh, upY: window.__game.upY, lean: window.__debug.player().visual.lean?.rotation.x }));
+    await page.keyboard.up('KeyA');
+    await page.keyboard.up('KeyW');
+    console.log('ride:', JSON.stringify(s));
   }
 } finally {
   await browser.close();
