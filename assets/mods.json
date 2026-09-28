@@ -77,7 +77,8 @@
     "archiveBytes": 123847426,
     "format": "gta5-dlc-rpf",
     "notes": "Photogrammetry (Google 3D tiles) extraction of the Golden Gate Bridge + surroundings, ~2.7 km real sea suspension bridge; .mods/bridge-golden-gate-scan/x/gm_sfgg/dlc.rpf. Scan mesh, baked lighting, no clean road surface - may need collision proxy.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: bridges are built on the curve (bridges.ts)"
   },
   {
     "id": "bld-grandcyberpunk",
@@ -591,7 +592,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.92/5 (24 votes). 10 km straight, 7 lanes each way, heavy traffic, Dubai skyline. At X 5000 Y 5000 Z 20.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-dubai-islands",
@@ -606,7 +608,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "Real landmark buildings but not a real street layout. 4.62/5 (63 votes), 87k downloads. V2.1 collision fix. Paid VIP version (Patreon) not fetched.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-french-riviera",
@@ -633,7 +636,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (urban highway past the Fukuoka beaches). 4.84/5 (37 votes). v2.1: traffic path nodes, lighting (lodlights/distant lights), redone collisions, road normal/spec, instanced section loading, geometry halved. Located far NW of Paleto Bay.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-gostown-paradise",
@@ -645,7 +649,8 @@
     "archiveBytes": 549378805,
     "format": "GTA V Legacy + FiveM (loose stream files, 38 YBN), zip",
     "notes": "Rating 4.41/5 (23 votes), ~7.7k downloads. Fictional tropical/Miami-flavoured city from the GTA SA total conversion; big (tunnels, downtown, docks, seabed collision). Older SA-era textures. No YND. Verdict: good Miami-style companion (Sunshine Dream lists it as optional addon); below 4.5 bar and dated textures.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-hong-kong",
@@ -660,7 +665,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "Real-city-inspired racing environment (GRID 2 Hong Kong). 4.57/5 (14 votes). v1.1 at X -7000 Y -6000 Z 500. A paid 'Ultimate Edition' exists (hipolink) - not fetched.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-midnight-shuto",
@@ -675,7 +681,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (Tokyo expressway at night). 3.75/5 (18 votes). Total conversion that replaces the GTA V base map. Hosted on Mediafire (1.13 GB); the script scrapes the short-lived direct link.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-monaco-gp",
@@ -690,7 +697,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE (Monaco city streets / F1 circuit) on a custom mountainous island SW of LSIA, plus a highway to a large asphalt square. 4.78/5 (32 votes). Low-end-PC friendly.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-nfsu2-bayview",
@@ -705,7 +713,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "Not a real place, but the classic neon street-racing city. 3.84/5 (28 votes). Total map conversion via the GTA IV port.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-shibuya",
@@ -735,7 +744,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "REAL PLACE. 4.26/5 (17 votes). CityEngine-generated street grid for the whole Shinjuku district plus hand-modelled real landmarks (Mode Gakuen Cocoon Tower, NTT Docomo Yoyogi, Sompo Japan, Tokyo Metropolitan Government Bldg, Shinjuku Center/Mitsui/Sumitomo). Beta 0.1: known vertex-shading shadow artifacts. Needs No Boundary Limits in-game (far from LS).",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "retired from the world (city analysis)"
   },
   {
     "id": "map-tsukuba-touge",
@@ -1304,7 +1314,8 @@
     "archiveBytes": 1713237836,
     "format": "rar -> dlc.rpf x4 + oiv",
     "notes": "MillionVegi/dlc.rpf (354MB) holds ~50 vanilla-archetype-named tree replacements (prop_tree_birch_*, prop_tree_cedar_*, prop_rus_olive*, prop_rio_del_01 with _l2/_l3 LODs) as ydr+ytd -> converter can map directly. MillionTrees/dlc.rpf = ytyp/ymaps (placement, not needed). MillionBlanks (1GB) blanks vanilla veg - ignore. Palms reportedly unedited. Freeware mod, no explicit license; personal use.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: trees for GTA V's own map"
   },
   {
     "id": "veg-polyhaven-shrubs",
@@ -1364,7 +1375,8 @@
     "format": "GTA V ydr, zip",
     "notes": "Older 1.1 of the same palms; kept for reference, veg-oldgen-palms (1.2) is used.",
     "archiveBytes": 44045742,
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: a retexture of GTA V's own palms"
   },
   {
     "id": "road-real-california",
@@ -1388,7 +1400,8 @@
     "format": "GTA V dlc.rpf, zip",
     "notes": "Rating 4.89. Autumn and winter vegetation with LODs, for seasonal or mountain islands.",
     "archiveBytes": 296076898,
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: a retexture of GTA V's own vegetation"
   },
   {
     "id": "veg-grass-v",
@@ -1400,7 +1413,8 @@
     "format": "GTA V oiv, zip",
     "notes": "Rating 4.96. Grass models and textures.",
     "archiveBytes": 38776918,
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: a retexture of GTA V's own grass"
   },
   {
     "id": "veg-real-palms",
@@ -1412,7 +1426,8 @@
     "format": "GTA V rpf, rar",
     "notes": "Rating 4.86. Realistic palm replacements.",
     "archiveBytes": 5618069,
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used: a retexture of GTA V's own palms"
   },
   {
     "id": "road-freeway-barriers-lit",
@@ -1436,7 +1451,8 @@
     "format": "GTA V ydr, zip",
     "notes": "Rating 4.83. Modular road, ramp and bridge pieces. road-modular-map-builder holds the same pack unpacked.",
     "archiveBytes": 311,
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "not used (empty duplicate of road-modular-map-builder)"
   },
   {
     "id": "map-lordcity",
@@ -1489,7 +1505,9 @@
     "format": "mixed",
     "files": [],
     "hasLoose": false,
-    "notes": "5.0/5 (22 votes), featured, October 2025. A snowy city frozen in the 1990s: Pinecrest Village plus the Pinecrest City Expansion."
+    "notes": "5.0/5 (22 votes), featured, October 2025. A snowy city frozen in the 1990s: Pinecrest Village plus the Pinecrest City Expansion.",
+    "rejected": "checked and rejected: San Andreas-era textures",
+    "downloaded": false
   },
   {
     "id": "map-los-injurus",
@@ -1501,7 +1519,9 @@
     "format": "beamng-level",
     "files": [],
     "hasLoose": true,
-    "notes": "970k downloads, 4.77/5 (163 ratings), version 2023-12-20, 3.5 GB. A large Los Angeles-style city: downtown towers, freeways, suburbs, a subway. 'All pieces in this map may be used by others with credit AND a link-back to this resource.'"
+    "notes": "970k downloads, 4.77/5 (163 ratings), version 2023-12-20, 3.5 GB. A large Los Angeles-style city: downtown towers, freeways, suburbs, a subway. 'All pieces in this map may be used by others with credit AND a link-back to this resource.'",
+    "rejected": "checked and rejected: plain box buildings, and a BeamNG map (no converter)",
+    "downloaded": false
   },
   {
     "id": "map-carla",
