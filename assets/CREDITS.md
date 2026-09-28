@@ -7,15 +7,30 @@ rights holders).
 
 ## Supercars
 
-- [2017 Lamborghini Terzo Millennio [Add-On | FiveM | AltV]](https://www.gta5-mods.com/vehicles/lamborghini-terzo-millennio-2017-addon-fivem) by OceanRAZR
 - [2018 Lamborghini Huracan Performante [Add-On / Replace]](https://www.gta5-mods.com/vehicles/2018-lamborghini-huracan-performante-add-on-replace) by Ying (model: CSR2 & Assetto Corsa; SA convert SHDru & Rulezz)
-- [Lamborghini Centenario LP 770-4 [Remastered | Livery | FiveM]](https://www.gta5-mods.com/vehicles/lamborghini-centenario) by Gta5KoRn
-- [2020 Ferrari SF90 Stradale [Add-On | Template]](https://www.gta5-mods.com/vehicles/2020-ferrari-sf90-stradale-add-on-lods-template) by Abolfazldanaee (model: CSR2)
-- [2018 Ferrari 812 Superfast [Livery | Add-on | Replace]](https://www.gta5-mods.com/vehicles/ferrari-812-superfast) by Gta5KoRn
-- [Ferrari FXX-K Hybrid Hypercar [Add-On]](https://www.gta5-mods.com/vehicles/ferrari-fxx-k) by Rmod Customs (model: Kunos Simulazioni / Assetto Corsa)
-- [2017 Bugatti Chiron [Add-On / Replace]](https://www.gta5-mods.com/vehicles/2017-bugatti-chiron-add-on-replace-auto-spoiler-hq-interior) by ahmeda1999 (model: Turn 10 / Forza Motorsport 7, parts: Project CARS)
-- [2019 Bugatti Divo [Add-On]](https://www.gta5-mods.com/vehicles/bugatti-divo-gta5korn) by Gta5KoRn (model: CSR2 + Forza parts)
-- [2020 Bugatti Bolide [Add-On / FiveM]](https://www.gta5-mods.com/vehicles/2020-bugatti-bolide-addon-sp-fivem) by marko_1555
+- [Koenigsegg Jesko Absolut [Add-On | Legacy | Enhanced]](https://www.gta5-mods.com/vehicles/koenigsegg-jesko-absolut-add-on) by Hammer76 (base model: Sketchfab)
+- [2014 McLaren P1 [Add-On / Replace]](https://www.gta5-mods.com/vehicles/2014-mclaren-p1-fb28b756-465d-43e7-b4e0-9793bfa5f714) by [YCA]Aige (model: Assetto Corsa, Project CARS, Forza Horizon 3)
+- [Pagani Huayra R [Add-On]](https://www.gta5-mods.com/vehicles/pagani-huayra-r-add-on) by motokorp (model: CSR2)
+- [Aston Martin Valkyrie Track Pack [Add-On]](https://www.gta5-mods.com/vehicles/aston-martin-valkyrie-track-pack-add-on) by motokorp/centrai (model: CSR2)
+
+## Muscle cars
+
+- [1969 Dodge Charger R/T [Add-On / Replace | Tuning | Template]](https://www.gta5-mods.com/vehicles/1969-dodge-charger-r-t-add-on-replace-tuning-hq) by tk0wnz
+- [Dom's 1970 Dodge Charger (Furious 7) [Working Blower | Add-On | LODs]](https://www.gta5-mods.com/vehicles/dom-s-1970-dodge-charger-furious-7-add-on-replace-working-blower-custom-dirt) by Zievs
+- [1970 Chevrolet Chevelle SS [Add-On / Replace]](https://www.gta5-mods.com/vehicles/1970-chevrolet-chevelle-ss) by DragoN777 (model: Forza Motorsport 4)
+- [1969 Chevrolet Camaro SS [Add-On]](https://www.gta5-mods.com/vehicles/1969-chevrolet-camaro-ss) by Neophyte Industries (original author Juiced2)
+- [1970 Dodge Challenger R/T Hemi [Add-On | LODs]](https://www.gta5-mods.com/vehicles/1970-dodge-challenger-r-t-hemi-add-on) by Zievs
+- [1969 Ford Mustang Boss 429 [Add-On / Replace]](https://www.gta5-mods.com/vehicles/1969-ford-mustang-boss-426) by HitmanNiko
+- [1969 Pontiac GTO Judge [Add-On / Replace | Tuning]](https://www.gta5-mods.com/vehicles/69-pontiac-gto-judge) by merendas235 (model: CSR2)
+
+## Motorbikes
+
+- [2018 Ducati Panigale V4 Speciale [Add-On | Tuning | Template]](https://www.gta5-mods.com/vehicles/2018-ducati-v4-speciale-add-on-tuning-template) by Joe_Garage-MOD
+- [2021 BMW M1000rr [Add-On]](https://www.gta5-mods.com/vehicles/2021-bmw-m1000rr-add-on) by 15thCentury
+- [Kawasaki Ninja H2 & H2R [Add-On | Tunable]](https://www.gta5-mods.com/vehicles/kawasaki-ninja-h2-h2r-add-on-tunable) by Imtaj
+- [2020 Yamaha YZF-R1/R1M [Add-on | Tuning | Livery | Template]](https://www.gta5-mods.com/vehicles/2020-yamaha-yzf-r1-r1m) by ZenimoX, NGR_Ardiansyah, Ma_Mat
+- [Harley-Davidson FLHXS Street Glide Special 2018 [Add-On / Replace | FiveM]](https://www.gta5-mods.com/vehicles/harley-davidson-flhxs-street-glide-special-2018-addon-replace-fivem) by BlueKingNL
+- [Harley Davidson Fat Boy Terminator 2 [Add-On]](https://www.gta5-mods.com/vehicles/harley-davidson-fat-boy-terminator-2-hq-add-on) by ATRO_ONE
 
 ## Traffic
 

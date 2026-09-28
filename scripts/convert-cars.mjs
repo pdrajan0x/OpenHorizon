@@ -8,15 +8,27 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path';
 
 const CARS = [
-  { id: 'lambo-terzo', mod: 'lambo-terzo-millennio', model: 'ocnlamtmc', name: 'Terzo Millennio', make: 'Lamborghini' },
   { id: 'lambo-huracan', mod: 'lambo-huracan-performante', model: 'vacca', name: 'Huracán Performante', make: 'Lamborghini' },
-  { id: 'lambo-centenario', mod: 'lambo-centenario', model: 'lp770', name: 'Centenario', make: 'Lamborghini' },
-  { id: 'ferrari-sf90', mod: 'ferrari-sf90', model: 'sf90', name: 'SF90 Stradale', make: 'Ferrari' },
-  { id: 'ferrari-812', mod: 'ferrari-812-superfast', model: 'italigtb2', name: '812 Superfast', make: 'Ferrari' },
-  { id: 'ferrari-fxxk', mod: 'ferrari-fxx-k', model: 'fxxk', name: 'FXX-K', make: 'Ferrari' },
-  { id: 'bugatti-chiron', mod: 'bugatti-chiron', model: 'nero', name: 'Chiron', make: 'Bugatti' },
-  { id: 'bugatti-divo', mod: 'bugatti-divo', model: 'divo', name: 'Divo', make: 'Bugatti' },
-  { id: 'bugatti-bolide', mod: 'bugatti-bolide', model: 'bolide', name: 'Bolide', make: 'Bugatti' },
+  // Muscle cars
+  { id: 'muscle-charger-69', mod: 'muscle-charger-69', model: '69charger', name: 'Charger R/T 1969', make: 'Dodge' },
+  { id: 'muscle-charger-dom-70', mod: 'muscle-charger-dom-70', model: 'rt70', name: "Charger R/T 1970 (Dom's)", make: 'Dodge' },
+  { id: 'muscle-chevelle-70', mod: 'muscle-chevelle-70', model: 'chevelle1970', name: 'Chevelle SS 1970', make: 'Chevrolet' },
+  { id: 'muscle-camaro-69', mod: 'muscle-camaro-69', model: 'camaro_ss', name: 'Camaro SS 1969', make: 'Chevrolet' },
+  { id: 'muscle-challenger-70', mod: 'muscle-challenger-70', model: 'chall70', name: 'Challenger R/T Hemi 1970', make: 'Dodge' },
+  { id: 'muscle-mustang-boss-69', mod: 'muscle-mustang-boss-69', model: 'boss429', name: 'Mustang Boss 429 1969', make: 'Ford' },
+  { id: 'muscle-gto-judge-69', mod: 'muscle-gto-judge-69', model: 'judge', name: 'GTO Judge 1969', make: 'Pontiac' },
+  // More supercars
+  { id: 'koenigsegg-jesko', mod: 'hero-koenigsegg-jesko', model: 'jesko', name: 'Jesko Absolut', make: 'Koenigsegg', prefer: 'Legacy' },
+  { id: 'mclaren-p1', mod: 'hero-mclaren-p1', model: 'p1', name: 'P1', make: 'McLaren' },
+  { id: 'pagani-huayra-r', mod: 'hero-pagani-huayra-r', model: 'huayrar', name: 'Huayra R', make: 'Pagani' },
+  { id: 'aston-valkyrie', mod: 'hero-aston-valkyrie', model: 'valkyrietp', name: 'Valkyrie', make: 'Aston Martin' },
+  // Motorbikes
+  { id: 'bike-ducati-v4', mod: 'bike-ducati-v4-speciale', model: 'v4sp', name: 'Panigale V4 Speciale', make: 'Ducati', bike: true },
+  { id: 'bike-bmw-m1000rr', mod: 'bike-bmw-m1000rr', model: 'km1000rr', name: 'M 1000 RR', make: 'BMW', bike: true },
+  { id: 'bike-kawasaki-h2r', mod: 'bike-kawasaki-h2r', model: 'nh2r', name: 'Ninja H2R', make: 'Kawasaki', bike: true },
+  { id: 'bike-yamaha-r1m', mod: 'bike-yamaha-r1m', model: '20r1', name: 'YZF-R1M', make: 'Yamaha', bike: true },
+  { id: 'bike-harley-street-glide', mod: 'bike-harley-street-glide', model: 'flhxs_streetglide_special18', name: 'Street Glide Special', make: 'Harley-Davidson', bike: true },
+  { id: 'bike-harley-fat-boy', mod: 'bike-harley-fat-boy', model: 'hvrod', name: 'Fat Boy', make: 'Harley-Davidson', bike: true },
   // Everyday traffic
   { id: 'traffic-prius', mod: 'traffic-prius-taxi', model: 'priustaxi', name: 'Prius Taxi', make: 'Toyota' },
   { id: 'traffic-crownvic', mod: 'traffic-crownvic-taxi', model: 'taxi', name: 'Crown Victoria Taxi', make: 'Ford' },
@@ -57,13 +69,17 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Unpack any dlc.rpf that hasn't been unpacked yet, so loose files are available. */
-function unpack(modDir) {
+/**
+ * Unpack the mod's dlc.rpf (the one under a folder named `prefer`, when a mod ships several: GTA V Enhanced
+ * archives don't read), so loose files are available. Returns the folder unpacked into.
+ */
+function unpack(modDir, prefer) {
+  const dest = join(modDir, prefer ? `rpf-${prefer}` : 'rpf');
   for (const f of walk(modDir)) {
-    if (!f.endsWith('dlc.rpf') || f.includes('/rpf/')) continue;
-    const dest = join(modDir, 'rpf');
+    if (!f.endsWith('dlc.rpf') || /\/rpf(-[^/]+)?\//.test(f) || (prefer && !f.includes(`/${prefer}/`))) continue;
     if (!existsSync(dest)) execFileSync('dotnet', [CONV, 'rpf', f, dest], { stdio: 'inherit' });
   }
+  return dest;
 }
 
 /** Numbers from the mod's handling.meta item for this model (first item when names don't match). */
@@ -102,8 +118,9 @@ for (const car of CARS.filter((c) => only.length === 0 || only.includes(c.id))) 
     console.log(`skip ${car.id}: ${dir} not downloaded`);
     continue;
   }
-  unpack(dir);
-  const files = walk(dir);
+  const unpacked = unpack(dir, car.prefer);
+  // With a preferred archive, only its files (and the loose ones beside it)
+  const files = walk(dir).filter((f) => !car.prefer || f.startsWith(unpacked) || (f.includes(`/${car.prefer}/`) && !/\/rpf(-[^/]+)?\//.test(f)));
   const find = (name) => files.find((f) => f.toLowerCase().endsWith(`/${name}`.toLowerCase()));
   const hi = find(`${car.model}_hi.yft`);
   const base = find(`${car.model}.yft`);

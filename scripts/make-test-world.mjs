@@ -15,7 +15,7 @@ import sharp from 'sharp';
 const OUT = '.build/test-public/mods';
 const CELL = 200;
 
-const CARS = ['lambo-huracan', 'ferrari-sf90', 'bugatti-chiron', 'lambo-centenario', 'ferrari-812', 'bugatti-divo', 'lambo-terzo', 'ferrari-fxxk', 'bugatti-bolide'];
+const CARS = ['lambo-huracan', 'koenigsegg-jesko', 'mclaren-p1', 'pagani-huayra-r', 'aston-valkyrie', 'muscle-charger-69', 'muscle-charger-dom-70', 'muscle-chevelle-70', 'muscle-camaro-69', 'muscle-challenger-70', 'muscle-mustang-boss-69', 'muscle-gto-judge-69'];
 const TRAFFIC = ['traffic-camry', 'traffic-civic', 'traffic-passat', 'traffic-prius', 'traffic-crownvic', 'traffic-landcruiser', 'traffic-f150', 'traffic-sprinter'];
 const ENGINES = ['lambo-v12', 'ferrari-v8', 'hyper-v8', 'ferrari-v12'];
 

@@ -6,20 +6,27 @@ import * as THREE from 'three';
 import { loadModCar, modCarVisual, type Template } from './modcar';
 import { BASE, GARAGE, RIVAL_GARAGE, type CarTuning } from './tuning';
 
-/** Garage order: number keys 1–9 pick these. */
+/** Garage order: number keys 1–9 pick the first nine (the pause menu lists them all). */
 // Engine sounds come from sound mods of each car's own engine, or its closest relative
-// (public/mods/audio): the Huracán's V10 is the Audi R8's, the SF90's twin-turbo V8 the 488's, the 812
-// and FXX-K share the LaFerrari's V12, the Centenario the Aventador's, the Bugattis a W16 quad-turbo
+// (public/mods/audio): the Huracán's V10 is the Audi R8's; the P1 has its own twin-turbo V8 and the Jesko
+// borrows it; the Huayra R's and the Valkyrie's naturally aspirated V12s are the LaFerrari's and the
+// Aventador's; the Mopars (Chargers, Challenger) get the Hellcat's supercharged V8, the Chevrolets, Ford
+// and Pontiac the small-block Corvette's.
+// Muscle cars in their period colours: B5 Blue, Tuxedo Black, Cranberry Red, LeMans Blue, Plum Crazy,
+// Wimbledon White, Carousel Red.
 const CARS = [
   { id: 'lambo-huracan', paint: 0x6fbf1f, engine: 'audi-v10' },
-  { id: 'ferrari-sf90', paint: 0xc4121c, engine: 'ferrari-v8' },
-  { id: 'bugatti-chiron', paint: 0x1f4fbf, engine: 'bugatti-w16' },
-  { id: 'lambo-centenario', paint: 0x2a2d33, engine: 'lambo-v12' },
-  { id: 'ferrari-812', paint: 0xd8d8dc, engine: 'ferrari-v12' },
-  { id: 'bugatti-divo', paint: 0x3fa9d6, engine: 'bugatti-w16' },
-  { id: 'lambo-terzo', paint: 0xe8e8ec, engine: 'lambo-v12' },
-  { id: 'ferrari-fxxk', paint: 0xcf1a1a, engine: 'ferrari-v12' },
-  { id: 'bugatti-bolide', paint: 0x14161c, engine: 'bugatti-w16' },
+  { id: 'koenigsegg-jesko', paint: 0xe8ebef, engine: 'hyper-v8' },
+  { id: 'mclaren-p1', paint: 0xf26b1d, engine: 'hyper-v8' },
+  { id: 'pagani-huayra-r', paint: 0x1c3f94, engine: 'ferrari-v12' },
+  { id: 'aston-valkyrie', paint: 0x0f4a33, engine: 'lambo-v12' },
+  { id: 'muscle-charger-69', paint: 0x2f6fc4, engine: 'muscle-v8' },
+  { id: 'muscle-charger-dom-70', paint: 0x0c0c0e, engine: 'muscle-v8' },
+  { id: 'muscle-chevelle-70', paint: 0x8a1522, engine: 'corvette-v8' },
+  { id: 'muscle-camaro-69', paint: 0x173a8a, engine: 'corvette-v8' },
+  { id: 'muscle-challenger-70', paint: 0x5b2a86, engine: 'muscle-v8' },
+  { id: 'muscle-mustang-boss-69', paint: 0xe9e6dc, engine: 'corvette-v8' },
+  { id: 'muscle-gto-judge-69', paint: 0xe25a1c, engine: 'corvette-v8' },
 ];
 
 interface Spec {

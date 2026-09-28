@@ -445,7 +445,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.85/5 (36 votes), 175k downloads. HQ interior/exterior, dirt mapping, FiveM resource.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "bugatti-chiron",
@@ -460,7 +461,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.9/5 (155 votes), 405k downloads. HQ interior/exterior, 3D engine and undercarriage, working auto-spoiler.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "bugatti-divo",
@@ -475,7 +477,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.98/5 (46 votes), 160k downloads. HQ exterior/interior/engine/trunk, autospoiler.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "ferrari-812-superfast",
@@ -490,7 +493,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.87/5 (86 votes), 219k downloads. Model from CSR2 + Assetto Corsa/FH3/FM7 parts. Add-on spawn F812, replace italigtb2. 5 liveries.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "ferrari-fxx-k",
@@ -505,7 +509,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.82/5 (62 votes), 229k downloads. HQ interior/exterior, 3D engine, auto spoiler, tuning parts, 3 liveries.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "ferrari-sf90",
@@ -520,7 +525,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.93/5 (58 votes). 'Reworked 1.0' updated 2026-02: new vertex AO, body/interior materials, wheels, lightmaps. LODs.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "lambo-centenario",
@@ -535,7 +541,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.91/5 (224 votes). Reconverted from Forza Horizon 4 (+CSR2/NFS No Limits/AC parts). HQ exterior/interior/3D engine, FiveM compatible, optimized textures.",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "lambo-huracan-performante",
@@ -565,7 +572,8 @@
     "files": [],
     "hasLoose": false,
     "notes": "4.94/5 (18 votes), 100k downloads. HQ exterior, MQ interior, glowing rims paint, animated aero. Author: \"Don't reupload and/or edit without my permission\".",
-    "downloaded": true
+    "downloaded": false,
+    "rejected": "removed from the garage (2026-09-28): the Huracán stays, new supercars and muscle cars instead"
   },
   {
     "id": "map-akina",
@@ -1549,5 +1557,192 @@
     "notes": "Rating 4.69 (67 votes). Photo-scanned European (Berlin) asphalt and footpath slabs: every city's roads and footpaths (src/roadSurface.ts).",
     "archiveBytes": 1860953769,
     "downloaded": true
+  },
+  {
+    "id": "muscle-charger-69",
+    "category": "muscle",
+    "title": "1969 Dodge Charger R/T [Add-On / Replace | Tuning | Template]",
+    "author": "tk0wnz",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/1969-dodge-charger-r-t-add-on-replace-tuning-hq",
+    "fileUrl": "https://files.gta5-mods.com/uploads/1969-dodge-charger-r-t-add-on-replace-tuning-hq/5b79d8-69%20Charger%20by%20tk0wnz%20v1.1b.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.86, 27,713 downloads.",
+    "archiveBytes": 69889285
+  },
+  {
+    "id": "muscle-chevelle-70",
+    "category": "muscle",
+    "title": "1970 Chevrolet Chevelle SS [Add-On / Replace]",
+    "author": "DragoN777",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/1970-chevrolet-chevelle-ss",
+    "fileUrl": "https://files.gta5-mods.com/uploads/1970-chevrolet-chevelle-ss/e20764-Chevrolet%20Chevelle%20SS%20v1.1%20by%20DragoN777.zip",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.84, 24,606 downloads.",
+    "archiveBytes": 26140389
+  },
+  {
+    "id": "muscle-camaro-69",
+    "category": "muscle",
+    "title": "1969 Chevrolet Camaro SS [Add-On]",
+    "author": "Neophyte Industries",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/1969-chevrolet-camaro-ss",
+    "fileUrl": "https://files.gta5-mods.com/uploads/1969-chevrolet-camaro-ss/b00cf3-Camaro%20SS%20Version%201.1.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.72, 7,988 downloads.",
+    "archiveBytes": 8602880
+  },
+  {
+    "id": "muscle-challenger-70",
+    "category": "muscle",
+    "title": "1970 Dodge Challenger R/T Hemi [Add-On | LODs]",
+    "author": "Zievs",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/1970-dodge-challenger-r-t-hemi-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/1970-dodge-challenger-r-t-hemi-add-on/0d1bfd-1970%20Dodge%20Challenger%20RT%20Hemi%20v1.1.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.8, 22,529 downloads.",
+    "archiveBytes": 52446915
+  },
+  {
+    "id": "muscle-mustang-boss-69",
+    "category": "muscle",
+    "title": "1969 Ford Mustang Boss 429 [Add-On / Replace]",
+    "author": "HitmanNiko",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/1969-ford-mustang-boss-426",
+    "fileUrl": "https://files.gta5-mods.com/uploads/1969-ford-mustang-boss-426/a4f0df-1969%20Ford%20Mustang%20Boss%20429%20%5BAdd-on%20-%20Replace%5D%20By%20HitmanNiko.zip",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.92, 98,520 downloads.",
+    "archiveBytes": 69274164
+  },
+  {
+    "id": "muscle-gto-judge-69",
+    "category": "muscle",
+    "title": "1969 Pontiac GTO Judge [Add-On / Replace | Tuning]",
+    "author": "merendas235",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/69-pontiac-gto-judge",
+    "fileUrl": "https://files.gta5-mods.com/uploads/69-pontiac-gto-judge/2334f1-pontiac%20gto%20judge%201969%201.4.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.38, 9,907 downloads.",
+    "archiveBytes": 70266417
+  },
+  {
+    "id": "muscle-charger-dom-70",
+    "category": "muscle",
+    "title": "Dom&#39;s 1970 Dodge Charger (Furious 7) [Working Blower | Add-On | LODs]",
+    "author": "Zievs",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/dom-s-1970-dodge-charger-furious-7-add-on-replace-working-blower-custom-dirt",
+    "fileUrl": "https://files.gta5-mods.com/uploads/dom-s-1970-dodge-charger-furious-7-add-on-replace-working-blower-custom-dirt/9dbb34-Dom%27s%201970%20Dodge%20Charger%20%28Furious%207%29%20-%20V1.4.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.93, 9,657 downloads.",
+    "archiveBytes": 37161029
+  },
+  {
+    "id": "hero-koenigsegg-jesko",
+    "category": "hero",
+    "title": "Koenigsegg Jesko Absolut  [Add-On | Legacy | Enhanced]",
+    "author": "Hammer76",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/koenigsegg-jesko-absolut-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/koenigsegg-jesko-absolut-add-on/61a9e6-Jesko%203.0.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.94, 5,530 downloads.",
+    "archiveBytes": 53325291
+  },
+  {
+    "id": "hero-mclaren-p1",
+    "category": "hero",
+    "title": "2014 McLaren P1",
+    "author": "[YCA]Aige",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2014-mclaren-p1-fb28b756-465d-43e7-b4e0-9793bfa5f714",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2014-mclaren-p1-fb28b756-465d-43e7-b4e0-9793bfa5f714/c394d7-2014%20McLaren%20P1%5BAdd-On_Replace%5DV2.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.83, 243,943 downloads.",
+    "archiveBytes": 40424083
+  },
+  {
+    "id": "hero-pagani-huayra-r",
+    "category": "hero",
+    "title": "Pagani Huayra R [Add-On]",
+    "author": "motokorp",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/pagani-huayra-r-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/pagani-huayra-r-add-on/aa0e30-huayrar_mod.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.64, 14,131 downloads.",
+    "archiveBytes": 7865860
+  },
+  {
+    "id": "hero-aston-valkyrie",
+    "category": "hero",
+    "title": "Aston Martin Valkyrie Track Pack [Add-On]",
+    "author": "motokorp/centrai",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/aston-martin-valkyrie-track-pack-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/aston-martin-valkyrie-track-pack-add-on/2fc271-valkyrietp_mod.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.81, 26,131 downloads.",
+    "archiveBytes": 15756688
+  },
+  {
+    "id": "bike-ducati-v4-speciale",
+    "category": "bike",
+    "title": "2018 Ducati Panigale V4 Speciale [ Add-On | Tuning | Template ]",
+    "author": "Joe_Garage-MOD",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2018-ducati-v4-speciale-add-on-tuning-template",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2018-ducati-v4-speciale-add-on-tuning-template/302b10-2018%20Ducati%20V4%20Speciale%5BJGM%5D%202.0.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.54, 24,011 downloads.",
+    "archiveBytes": 33486228
+  },
+  {
+    "id": "bike-bmw-m1000rr",
+    "category": "bike",
+    "title": "2021 BMW M1000rr [Add-On]",
+    "author": "15thCentury",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2021-bmw-m1000rr-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2021-bmw-m1000rr-add-on/458416-2021%20BMW%20M1000rr%20by15.zip",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 5, 31,728 downloads.",
+    "archiveBytes": 42278034
+  },
+  {
+    "id": "bike-kawasaki-h2r",
+    "category": "bike",
+    "title": "Kawasaki Ninja H2 & H2R [Add-On | Tunable]",
+    "author": "Imtaj",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/kawasaki-ninja-h2-h2r-add-on-tunable",
+    "fileUrl": "https://files.gta5-mods.com/uploads/kawasaki-ninja-h2-h2r-add-on-tunable/bca018-Kawasaki%20Ninja%20h2%20%26%20h2r%201.1%5BAdd-On%20%20Tunable%5D.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.41, 228,999 downloads.",
+    "archiveBytes": 17288901
+  },
+  {
+    "id": "bike-yamaha-r1m",
+    "category": "bike",
+    "title": "2020 Yamaha YZF-R1/R1M [Add-on | Tuning | Livery | Template]",
+    "author": "ZenimoX, NGR_Ardiansyah, Ma_Mat",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/2020-yamaha-yzf-r1-r1m",
+    "fileUrl": "https://files.gta5-mods.com/uploads/2020-yamaha-yzf-r1-r1m/39bbc2-2020_Yamaha_YZF_R1_V3.6.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.81, 4,032 downloads.",
+    "archiveBytes": 43680029
+  },
+  {
+    "id": "bike-harley-street-glide",
+    "category": "bike",
+    "title": "Harley-Davidson FLHXS - Street Glide Special 2018 [Add-On / Replace | FiveM]",
+    "author": "BlueKingNL",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/harley-davidson-flhxs-street-glide-special-2018-addon-replace-fivem",
+    "fileUrl": "https://files.gta5-mods.com/uploads/harley-davidson-flhxs-street-glide-special-2018-addon-replace-fivem/20e4cd-Harley-Davidson%20FLHXS%20Street%20Glide%20Special%202018%20version%200.4.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.5, 1,229 downloads.",
+    "archiveBytes": 68033638
+  },
+  {
+    "id": "bike-harley-fat-boy",
+    "category": "bike",
+    "title": "Harley Davidson Fat boy Terminator 2 [Add-On]",
+    "author": "ATRO_ONE",
+    "pageUrl": "https://www.gta5-mods.com/vehicles/harley-davidson-fat-boy-terminator-2-hq-add-on",
+    "fileUrl": "https://files.gta5-mods.com/uploads/harley-davidson-fat-boy-terminator-2-hq-add-on/a7c07f-44b728-Harley%20v2.rar",
+    "format": "GTA V add-on vehicle",
+    "notes": "Rating 4.52, 6,618 downloads.",
+    "archiveBytes": 11264111
   }
 ]

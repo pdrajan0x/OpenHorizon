@@ -4,7 +4,7 @@ import { loadModCar, modCarVisual } from './modcar';
 import { neonStudioEnvironment, PostFX } from './postfx';
 
 const params = new URLSearchParams(location.search);
-const name = params.get('car') ?? 'quadra';
+const name = params.get('car') ?? 'lambo-huracan';
 const view = params.get('view') ?? 'front';
 const paint = Number(params.get('paint') ?? 0xd02a38);
 

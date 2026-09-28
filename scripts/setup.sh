@@ -72,6 +72,8 @@ if has audio; then
   engine ferrari-v8 "$RS/(New 2.0) 488 GTB Real Sound Mod.rar.x/488 GTB Real Sound Mod" "Ferrari V8"
   engine hyper-v8 "$RS/Mclaren P1 Sound Mod by PeaceOne.rar.x/Mclaren P1 Sound Mod by PeaceOne" "Hypercar V8"
   engine audi-v10 "$RS/Audi R8 Sound Mod 2.0 by PeaceOne.rar.x/R8 Sound Mod 2.0" "Audi / Lamborghini V10"
+  engine muscle-v8 "$RS/Dodge Charger SRT Hellcat sound mod by PeaceOne.rar.x/2016 Dodge Charger SRT Hellcat sound mod" "Supercharged muscle V8"
+  engine corvette-v8 "$RS/Corvette ZR1 Real Sound Mod by PeaceOne.rar.x/Corvette ZR1" "Chevrolet small-block V8"
   engine bugatti-w16 ".mods/audio-bugatti-w16/x/FiveM/lg62chironpursport" "Bugatti W16"
   mkdir -p public/mods/audio/skid public/mods/audio/crash
   ffmpeg -loglevel error -y -i ".mods/audio-tire-skid/x/Realistic Tire Skids SOUND MOD/MAIN_TARMAC_SKID_A.wav" -c:a libopus public/mods/audio/skid/tarmac.ogg
