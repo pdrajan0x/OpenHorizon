@@ -33,6 +33,7 @@ const CONTROLS: [string, string, string][] = [
   ['Back on the road', 'D-pad up', 'R'],
   ['Map', 'View', 'M'],
   ['Mark this spot (shows and copies where you are)', 'D-pad down', 'P'],
+  ['Fix mode: fly round, click a piece, X delete · K solid · N passable · Z undo', '', 'E'],
   ['Pause menu', 'Menu', 'Esc'],
 ];
 

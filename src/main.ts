@@ -24,6 +24,7 @@ import { Traffic } from './traffic';
 import { WreckSmoke } from './damage';
 import { ensureHero, loadGarage, loadTrafficModels } from './garage';
 import { PauseMenu } from './menu';
+import { Editor } from './editor';
 import { GARAGE } from './tuning';
 
 const FIXED_DT = 1 / 60;
@@ -183,6 +184,8 @@ async function main(): Promise<void> {
       simTime: () => simTime,
     };
   }
+
+  const editor = new Editor(scene, cam.camera, canvas, map, (at) => { void teleport(new THREE.Vector2(at.x, at.z)); });
 
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -380,6 +383,27 @@ async function main(): Promise<void> {
     }
 
     const { controls, actions } = input.update(dt);
+    // Fix mode: the game stops, the camera flies, the city streams in round it (editor.ts)
+    if (editor.open) {
+      if (actions.edit || actions.menu) {
+        editor.toggle();
+        cam.snap();
+      } else {
+        editor.update(dt);
+        map.update(cam.camera.position, [cam.camera.position]);
+        map.cull(cam.camera.position);
+        atmosphere.update(simTime, cam.camera.position);
+        ocean.update(simTime, cam.camera.position);
+        audio.pause();
+        fx.render();
+        requestAnimationFrame(frame);
+        return;
+      }
+    } else if (actions.edit && !events.running && !crash && !wreck) {
+      editor.toggle();
+      requestAnimationFrame(frame);
+      return;
+    }
     if (actions.menu) menu.escape();
     if (menu.open) {
       menu.update(input.nav);

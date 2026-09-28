@@ -193,3 +193,21 @@ html, body {
   white-space: pre-line; font: 12px/1.5 ui-monospace, monospace; color: #9fe8ff;
   padding: 8px 10px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;
 }
+
+/* Fix mode (src/editor.ts) */
+#editor {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(8, 14, 20, 0.82);
+  color: #e8eef2;
+  font: 13px/1.5 system-ui, sans-serif;
+  pointer-events: none;
+  z-index: 20;
+}
+#editor b { color: #ffd400; }
+#editor small { color: #9fb0bc; }
+#editor.hidden { display: none; }

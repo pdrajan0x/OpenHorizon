@@ -91,6 +91,42 @@ function dropInside(v: Float32Array, stride: number, index: Uint32Array, boxes: 
   return keep.length === index.length ? index : new Uint32Array(keep);
 }
 
+/**
+ * A fix made in the game (editor.ts, saved to the map's edits.json): one piece of a cell, by its mesh name
+ * (shader:texture) and bounds in the map's frame. delete: not drawn and not solid; passable: drawn, not
+ * solid; solid: made solid as drawn.
+ */
+export interface Edit {
+  op: 'delete' | 'passable' | 'solid';
+  cell: number;
+  mesh: string;
+  box: [number, number, number, number, number, number];
+}
+
+/** Collision less the triangles inside any box (0.3 m slack), bar the level ones at a box's bottom (the ground under a piece). */
+function dropCollisionInside<T extends Uint32Array>(pos: Float32Array, index: T, boxes: number[][]): T {
+  if (!boxes.length) return index;
+  const keep: number[] = [];
+  const inside = (i: number, b: number[]) => {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    return x >= b[0] - 0.3 && y >= b[1] - 0.3 && z >= b[2] - 0.3 && x <= b[3] + 0.3 && y <= b[4] + 0.3 && z <= b[5] + 0.3;
+  };
+  for (let t = 0; t + 2 < index.length; t += 3) {
+    const [a, b, c] = [index[t], index[t + 1], index[t + 2]];
+    const box = boxes.find((bx) => inside(a, bx) && inside(b, bx) && inside(c, bx));
+    if (box) {
+      const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+      const wx = pos[c * 3] - pos[a * 3], wy = pos[c * 3 + 1] - pos[a * 3 + 1], wz = pos[c * 3 + 2] - pos[a * 3 + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      const level = Math.abs(ny) > 0.85 * Math.hypot(nx, ny, nz);
+      const low = (pos[a * 3 + 1] + pos[b * 3 + 1] + pos[c * 3 + 1]) / 3 < box[1] + 0.5;
+      if (!(level && low)) continue;
+    }
+    keep.push(a, b, c);
+  }
+  return (keep.length === index.length ? index : new Uint32Array(keep)) as T;
+}
+
 /** Maps whose drawn road, pavement, guard rails and lamp posts are made solid as well (their own collision has gaps). */
 const SURFACE_COLLISION_MAPS = /^carla-/;
 const HIDE = (() => { const h = new URLSearchParams(location.search).get('hide'); return h ? new RegExp(h) : null; })();
@@ -458,7 +494,7 @@ export class GameMap {
           this.dropFar(c.id);
         }
       }
-      if (c.collision || (c.render && SURFACE_COLLISION_MAPS.test(this.id))) {
+      if (c.collision || (c.render && (SURFACE_COLLISION_MAPS.test(this.id) || this.edits.some((e) => e.cell === c.id && e.op === 'solid')))) {
         const near = Math.min(...solid.map((p) => this.distance(c, p)));
         const col = this.colliders.get(c.id);
         if (!col && near < COLLISION_RADIUS) void this.loadCollision(c);
@@ -573,8 +609,58 @@ export class GameMap {
     return this.floating.then((m) => m.get(cell) ?? []);
   }
 
+  /** This map's fixes (edits.json), loaded once; the editor adds to them. */
+  edits: Edit[] = [];
+  private editsLoaded: Promise<Edit[]> | null = null;
+
+  loadEdits(): Promise<Edit[]> {
+    this.editsLoaded ??= fetch(`${this.base}/edits.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])
+      .then((list: Edit[]) => (this.edits = Array.isArray(list) ? list : []));
+    return this.editsLoaded;
+  }
+
+  /** Add fixes and show them at once (their cells load again). */
+  async applyEdits(list: Edit[]): Promise<void> {
+    await this.loadEdits();
+    this.edits.push(...list);
+    for (const id of new Set(list.map((e) => e.cell))) this.reload(id);
+  }
+
+  /** Take back the last `n` fixes. */
+  async undoEdits(n: number): Promise<void> {
+    await this.loadEdits();
+    const gone = this.edits.splice(Math.max(0, this.edits.length - n), n);
+    for (const id of new Set(gone.map((e) => e.cell))) this.reload(id);
+  }
+
+  /** Write the fixes to the map's edits.json (the dev and play servers take them: vite.config.ts). */
+  async saveEdits(): Promise<boolean> {
+    try {
+      const r = await fetch(`/__edits/${this.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(this.edits) });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Drop a cell's drawn and solid parts; the streaming loads them again (with any new fixes). */
+  reload(id: number): void {
+    const group = this.meshes.get(id);
+    if (group && group !== 'loading') {
+      this.root.remove(group);
+      group.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    }
+    this.meshes.delete(id);
+    const col = this.colliders.get(id);
+    if (col && col !== 'loading' && col !== 'none') this.world.removeCollider(col, false);
+    this.colliders.delete(id);
+  }
+
   private async parseCell(buf: ArrayBuffer, far: boolean, cellId = -1): Promise<THREE.Group> {
     const floating = cellId >= 0 ? await this.floatingIn(cellId) : [];
+    const deleted = cellId >= 0 ? (await this.loadEdits()).filter((e) => e.cell === cellId && e.op === 'delete') : [];
     const view = new DataView(buf);
     const jsonLength = view.getUint32(0, true);
     const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
@@ -604,8 +690,9 @@ export class GameMap {
       offset += b.indices * 4;
       let index: Uint32Array = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset, undefined, true) : raw;
       const mat = this.manifest.materials[b.material];
-      const gone = floating.filter((f) => f.name === `${mat.shader}:${mat.diffuse ?? 'untextured'}`);
-      if (gone.length) index = dropInside(interleaved, stride, index, gone.map((f) => f.box));
+      const meshName = `${mat.shader}:${mat.diffuse ?? 'untextured'}`;
+      const gone = [...floating.filter((f) => f.name === meshName).map((f) => f.box), ...deleted.filter((e) => e.mesh === meshName).map((e) => e.box)];
+      if (gone.length) index = dropInside(interleaved, stride, index, gone);
       if (!index.length) continue;
       const ib = new THREE.InterleavedBuffer(interleaved, stride);
       geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));
@@ -728,6 +815,24 @@ export class GameMap {
         raw = i2;
       }
     }
+    // Fixes: pieces made solid join the collision; deleted and passable ones leave it
+    const edits = (await this.loadEdits()).filter((e) => e.cell === c.id);
+    const solid = edits.filter((e) => e.op === 'solid');
+    if (solid.length && c.render) {
+      const extra = await this.renderTriangles(c, (name) => solid.filter((e) => e.mesh === name).map((e) => e.box));
+      if (extra) {
+        const base = pos.length / 3;
+        const p2 = new Float32Array(pos.length + extra.pos.length);
+        p2.set(pos);
+        p2.set(extra.pos, pos.length);
+        const i2 = new Uint32Array(raw.length + extra.idx.length);
+        i2.set(raw);
+        for (let k = 0; k < extra.idx.length; k++) i2[raw.length + k] = extra.idx[k] + base;
+        pos = p2;
+        raw = i2;
+      }
+    }
+    raw = dropCollisionInside(pos, raw, edits.filter((e) => e.op !== 'solid').map((e) => e.box));
     const idx = this.corridors ? this.corridors.cut(pos, 3, raw, this.offset) : raw;
     if (!idx.length) {
       this.colliders.set(c.id, 'none');
@@ -737,6 +842,44 @@ export class GameMap {
       .setTranslation(this.offset.x, this.offset.y, this.offset.z);
     const collider = this.world.createCollider(desc);
     this.colliders.set(c.id, collider);
+  }
+
+  /**
+   * From a cell's render file, the triangles of the batches `boxes` names (by mesh name) whose corners all lie
+   * in one of the boxes it gives for that batch, as positions + indices.
+   */
+  private async renderTriangles(c: CellInfo, boxes: (meshName: string) => number[][]): Promise<{ pos: Float32Array; idx: Uint32Array } | null> {
+    const buf = await download(`${this.base}/cells/${c.id}.bin`);
+    if (!buf) return null;
+    const view = new DataView(buf);
+    const jsonLength = view.getUint32(0, true);
+    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
+      batches: { material: number; vertices: number; indices: number; colors?: boolean }[];
+    };
+    let offset = 4 + jsonLength;
+    offset += (4 - (offset % 4)) % 4;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (const b of header.batches) {
+      const stride = b.colors ? 9 : 8;
+      const v = new Float32Array(buf, offset, b.vertices * stride);
+      offset += b.vertices * stride * 4;
+      const ix = new Uint32Array(buf, offset, b.indices);
+      offset += b.indices * 4;
+      const m = this.manifest.materials[b.material];
+      const bx = boxes(`${m.shader}:${m.diffuse ?? 'untextured'}`);
+      if (!bx.length) continue;
+      const inside = (i: number, q: number[]) => {
+        const x = v[i * stride], y = v[i * stride + 1], z = v[i * stride + 2];
+        return x >= q[0] - 0.3 && y >= q[1] - 0.3 && z >= q[2] - 0.3 && x <= q[3] + 0.3 && y <= q[4] + 0.3 && z <= q[5] + 0.3;
+      };
+      const base = pos.length / 3;
+      for (let i = 0; i < b.vertices; i++) pos.push(v[i * stride], v[i * stride + 1], v[i * stride + 2]);
+      for (let k = 0; k + 2 < ix.length; k += 3) {
+        if (bx.some((q) => inside(ix[k], q) && inside(ix[k + 1], q) && inside(ix[k + 2], q))) idx.push(ix[k] + base, ix[k + 1] + base, ix[k + 2] + base);
+      }
+    }
+    return idx.length ? { pos: new Float32Array(pos), idx: new Uint32Array(idx) } : null;
   }
 
   /** From a cell's render file, the triangles of its surfaces that must be solid (SURFACE_COLLISION), as positions + indices. */
