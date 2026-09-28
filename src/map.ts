@@ -130,6 +130,7 @@ function dropCollisionInside<T extends Uint32Array>(pos: Float32Array, index: T,
 
 /** Maps whose drawn road, pavement, guard rails and lamp posts are made solid as well (their own collision has gaps). */
 const SURFACE_COLLISION_MAPS = /^carla-/;
+const NEVER_DRAWN = /^cpv_only$/;
 const HIDE = (() => { const h = new URLSearchParams(location.search).get('hide'); return h ? new RegExp(h) : null; })();
 const SURFACE_COLLISION = /asphalt|sidewalk|curb|kerb|galvanizediron|concrete_square|streetlight|guardrail/i;
 const shadeUniforms = { uShadeNight: { value: 0 } };
@@ -673,7 +674,9 @@ export class GameMap {
     const group = new THREE.Group();
     for (const b of header.batches) {
       // ?hide=<shader regex> (testing): leave those batches out
-      if (HIDE && HIDE.test(this.manifest.materials[b.material]?.shader ?? '')) {
+      // GTA's cpv_only batches are plain white proxy boxes (occluders and stand-ins GTA never draws): where a
+      // mod lacks the real building they stood in for, they showed as blank white and black blocks
+      if (NEVER_DRAWN.test(this.manifest.materials[b.material]?.shader ?? '') || (HIDE && HIDE.test(this.manifest.materials[b.material]?.shader ?? ''))) {
         offset += b.vertices * (b.colors ? 9 : 8) * 4 + b.indices * 4;
         continue;
       }
