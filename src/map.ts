@@ -29,6 +29,68 @@ const FAR_LOADS_PER_FRAME = 2;
 let lightingSetup: ((m: THREE.MeshStandardMaterial) => void) | null = null;
 const litMaterials = new Set<THREE.MeshStandardMaterial>();
 /** GTA's baked vertex shading: how strongly it darkens, and the night glow of its artificial ambient. */
+/**
+ * CARLA's road networks come from OpenDRIVE, where a junction's roads stop short of each other (the
+ * converter's merge misses gaps over ~1 m): each dead end is joined to the nearest node of another road
+ * within WELD m, keeping its direction (what arrived at the dead end carries on). GPS, traffic and races
+ * then run through the junctions.
+ */
+export function weldJunctions(roads: RoadData): RoadData['links'] {
+  const WELD = 4;
+  const n = roads.nodes;
+  const degree = new Uint16Array(n.length);
+  const linkOf = new Int32Array(n.length).fill(-1);
+  roads.links.forEach(([a, b], k) => { degree[a]++; degree[b]++; linkOf[a] = k; linkOf[b] = k; });
+  const grid = new Map<string, number[]>();
+  n.forEach(([x, , z], i) => {
+    const key = `${Math.floor(x / WELD)},${Math.floor(z / WELD)}`;
+    const l = grid.get(key);
+    if (l) l.push(i); else grid.set(key, [i]);
+  });
+  const links = [...roads.links];
+  const done = new Set<string>();
+  for (let d = 0; d < n.length; d++) {
+    if (degree[d] !== 1) continue;
+    const [a, b, ab, ba] = roads.links[linkOf[d]];
+    const other = a === d ? b : a;
+    let best = -1;
+    let bestD = WELD;
+    const [x, y, z] = n[d];
+    const cx = Math.floor(x / WELD);
+    const cz = Math.floor(z / WELD);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      for (const t of grid.get(`${cx + i},${cz + j}`) ?? []) {
+        if (t === d || t === other || Math.abs(n[t][1] - y) > 1) continue;
+        const e = Math.hypot(n[t][0] - x, n[t][2] - z);
+        if (e < bestD) { bestD = e; best = t; }
+      }
+    }
+    if (best < 0) continue;
+    const key = d < best ? `${d},${best}` : `${best},${d}`;
+    if (done.has(key)) continue;
+    done.add(key);
+    // Lanes arriving at the dead end carry on to the road it meets; those leaving it come from there
+    const arriving = d === b ? ab : ba;
+    const leaving = d === b ? ba : ab;
+    links.push([d, best, arriving, leaving]);
+  }
+  return links;
+}
+
+/** An index buffer less the triangles whose corners all lie inside one of the boxes (0.3 m of slack). */
+function dropInside(v: Float32Array, stride: number, index: Uint32Array, boxes: number[][]): Uint32Array {
+  const keep: number[] = [];
+  const inside = (i: number, b: number[]) => {
+    const x = v[i * stride], y = v[i * stride + 1], z = v[i * stride + 2];
+    return x >= b[0] - 0.3 && y >= b[1] - 0.3 && z >= b[2] - 0.3 && x <= b[3] + 0.3 && y <= b[4] + 0.3 && z <= b[5] + 0.3;
+  };
+  for (let t = 0; t + 2 < index.length; t += 3) {
+    if (boxes.some((b) => inside(index[t], b) && inside(index[t + 1], b) && inside(index[t + 2], b))) continue;
+    keep.push(index[t], index[t + 1], index[t + 2]);
+  }
+  return keep.length === index.length ? index : new Uint32Array(keep);
+}
+
 /** Maps whose drawn road, pavement, guard rails and lamp posts are made solid as well (their own collision has gaps). */
 const SURFACE_COLLISION_MAPS = /^carla-/;
 const HIDE = (() => { const h = new URLSearchParams(location.search).get('hide'); return h ? new RegExp(h) : null; })();
@@ -269,6 +331,7 @@ export class GameMap {
   ) {
     const [ox, oy, oz] = [offset.x, offset.y, offset.z];
     this.roadData = { ...roads, nodes: roads.nodes.map(([x, y, z]) => [x + ox, y + oy, z + oz]) };
+    if (SURFACE_COLLISION_MAPS.test(id)) this.roadData.links = weldJunctions(this.roadData);
     this.roads = new RoadGraph(this.roadData);
     this.spawn = new THREE.Vector3(...(manifest.spawn as [number, number, number])).add(offset);
     this.materials = manifest.materials.map(() => [null, null]);
@@ -442,7 +505,7 @@ export class GameMap {
     this.meshes.set(c.id, 'loading');
     const buf = await download(`${this.base}/cells/${c.id}.bin`);
     if (!buf) return;
-    const group = await this.parseCell(buf, false);
+    const group = await this.parseCell(buf, false, c.id);
     group.name = `cell ${c.id}`;
     if (this.meshes.get(c.id) !== 'loading') return; // unloaded meanwhile
     this.meshes.set(c.id, group);
@@ -494,7 +557,24 @@ export class GameMap {
   }
 
   /** A cell file (cells/ or far/): header JSON, then per batch interleaved vertices and indices. */
-  private async parseCell(buf: ArrayBuffer, far: boolean): Promise<THREE.Group> {
+  /** Pieces left out as floating (scripts/floating.mjs): per cell, the mesh name and bounds. */
+  private floating: Promise<Map<number, { name: string; box: number[] }[]>> | null = null;
+
+  private floatingIn(cell: number): Promise<{ name: string; box: number[] }[]> {
+    this.floating ??= fetch(`${this.base}/floating.json`).then((r) => (r.ok ? r.json() : [])).catch(() => [])
+      .then((list: [number, string, ...number[]][]) => {
+        const m = new Map<number, { name: string; box: number[] }[]>();
+        for (const [c, name, ...box] of Array.isArray(list) ? list : []) {
+          if (!m.has(c)) m.set(c, []);
+          m.get(c)!.push({ name, box });
+        }
+        return m;
+      });
+    return this.floating.then((m) => m.get(cell) ?? []);
+  }
+
+  private async parseCell(buf: ArrayBuffer, far: boolean, cellId = -1): Promise<THREE.Group> {
+    const floating = cellId >= 0 ? await this.floatingIn(cellId) : [];
     const view = new DataView(buf);
     const jsonLength = view.getUint32(0, true);
     const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, jsonLength))) as {
@@ -522,7 +602,10 @@ export class GameMap {
       offset += b.vertices * stride * 4;
       const raw = new Uint32Array(buf, offset, b.indices);
       offset += b.indices * 4;
-      const index = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset, undefined, true) : raw;
+      let index: Uint32Array = this.corridors ? this.corridors.cut(interleaved, stride, raw, this.offset, undefined, true) : raw;
+      const mat = this.manifest.materials[b.material];
+      const gone = floating.filter((f) => f.name === `${mat.shader}:${mat.diffuse ?? 'untextured'}`);
+      if (gone.length) index = dropInside(interleaved, stride, index, gone.map((f) => f.box));
       if (!index.length) continue;
       const ib = new THREE.InterleavedBuffer(interleaved, stride);
       geo.setAttribute('position', new THREE.InterleavedBufferAttribute(ib, 3, 0));

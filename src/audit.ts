@@ -48,6 +48,8 @@ export interface Issue {
   hits: number; // rays or triangles that found it
   why: string;
   ray?: [number, number, number, number, number, number]; // one failed ray: from, to
+  /** Floating structures: [map, cell, mesh name, x0, y0, z0, x1, y1, z1] per piece, in the map's frame. */
+  pieces?: [string, number, string, number, number, number, number, number, number][];
   fixed?: boolean;
 }
 
@@ -382,13 +384,17 @@ export class Audit {
    */
   private checkFloating(meshes: THREE.Mesh[], at: THREE.Vector3): void {
     const FLOAT_TALL = 8;
-    const FLOAT_GAP = 4;
+    const FLOAT_GAP = 6;
+    // Trees (a trunk's lowest point is often in a hollow of the ground), foliage and GTA's untextured
+    // stand-in shells aren't structures
+    const NOT_STRUCTURE = /tree|trunk|branch|leaf|leaves|oak|pine|cedar|palm|bush|veg|foliage|grass|ivy/i;
     const v = new THREE.Vector3();
     const down = new THREE.Vector3(0, -1, 0);
     for (const m of meshes) {
       if ((m as THREE.InstancedMesh).isInstancedMesh || this.floatChecked.has(m.geometry)) continue;
-      const surface = m.userData.surface as { mask?: boolean; blend?: boolean } | undefined;
+      const surface = m.userData.surface as { mask?: boolean; blend?: boolean; shader?: string } | undefined;
       if (surface?.mask || surface?.blend || seeThrough(m.material as THREE.Material)) continue;
+      if (surface?.shader === 'cpv_only' || NOT_STRUCTURE.test(m.name)) continue;
       const g = m.geometry;
       if (!g.boundingSphere) g.computeBoundingSphere();
       const centre = g.boundingSphere!.center.clone().applyMatrix4(m.matrixWorld);
@@ -424,22 +430,33 @@ export class Audit {
       }
       for (const p of pieces.values()) {
         const w = Math.max(p.x1 - p.x0, p.z1 - p.z0);
-        if (p.y1 - p.y0 < FLOAT_TALL || w < 6 || w > 150) continue;
-        // Under its lowest corner, and under the middle of its footprint at that height
+        if (p.y1 - p.y0 < FLOAT_TALL || w < 8 || w > 150) continue;
+        // Under its base: its lowest corner, the middle of its footprint and the footprint's corners, a little
+        // inside, all at the base's height; floating when at least 4 of the 5 have nothing under them
+        const ix = (p.x1 - p.x0) * 0.15;
+        const iz = (p.z1 - p.z0) * 0.15;
         const probes = [
           v.fromBufferAttribute(pos, p.low).applyMatrix4(m.matrixWorld).clone(),
-          new THREE.Vector3((p.x0 + p.x1) / 2, p.y0, (p.z0 + p.z1) / 2).applyMatrix4(m.matrixWorld),
+          ...[[0.5, 0.5], [0, 0], [1, 0], [0, 1], [1, 1]].map(([a, b]) =>
+            new THREE.Vector3(p.x0 + ix + (p.x1 - p.x0 - 2 * ix) * a, p.y0, p.z0 + iz + (p.z1 - p.z0 - 2 * iz) * b).applyMatrix4(m.matrixWorld)),
         ];
-        const floating = probes.every((q) => {
+        const clear = probes.slice(1).filter((q) => {
           const from = q.clone().add(new THREE.Vector3(0, -0.3, 0));
-          const c = this.castCollision(from, down, FLOAT_GAP);
-          const r = this.castRender(meshes, from, down, FLOAT_GAP);
-          return !c && !r;
-        });
+          return !this.castCollision(from, down, FLOAT_GAP) && !this.castRender(meshes, from, down, FLOAT_GAP);
+        }).length;
+        const floating = clear >= 4;
         if (floating) {
-          this.report('B', 'floating structure (nothing under it)', probes[0], m,
+          const issue = this.report('B', 'floating structure (nothing under it)', probes[0], m,
             `A piece ${(p.y1 - p.y0).toFixed(0)} m tall and ${w.toFixed(0)} m across has nothing under its base for ${FLOAT_GAP} m or more, neither drawn nor solid: a building missing its lower storeys, or a wall hanging in the air.`,
             'high', [probes[0], probes[0].clone().addScaledVector(down, FLOAT_GAP)], MESH_CLUSTER);
+          // What to leave out to fix it (scripts/floating.mjs): the piece's cell, mesh and bounds in its map's frame
+          const cell = /^cell (\d+)$/.exec(m.parent?.name ?? '')?.[1];
+          const map = /^map:(.+)$/.exec(m.parent?.parent?.name ?? '')?.[1];
+          if (cell && map) {
+            issue.pieces ??= [];
+            const r = (v: number) => +v.toFixed(2);
+            issue.pieces.push([map, +cell, m.name, r(p.x0), r(p.y0), r(p.z0), r(p.x1), r(p.y1), r(p.z1)]);
+          }
         }
       }
     }

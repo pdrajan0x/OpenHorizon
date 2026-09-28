@@ -956,9 +956,11 @@ export class BridgeNetwork {
       collide(col, colIdx);
     };
     strip(frames, (f) => [[-f.hw, 0], [f.hw, 0]], true);
+    // The edge walls as high as the barrier drawn there (no invisible band above a lower model)
+    const wall = this.kit.barrier ? THREE.MathUtils.clamp(this.kit.barrier.height, 0.7, BARRIER_HEIGHT) : BARRIER_HEIGHT;
     if (inner.length) {
-      strip(inner, (f) => [[-f.hw, BARRIER_HEIGHT], [-f.hw, 0]], false);
-      strip(inner, (f) => [[f.hw, 0], [f.hw, BARRIER_HEIGHT]], false);
+      strip(inner, (f) => [[-f.hw, wall], [-f.hw, 0]], false);
+      strip(inner, (f) => [[f.hw, 0], [f.hw, wall]], false);
     }
     if (median.length > 2) strip(median, () => [[-0.35, 0], [-0.35, 0.9], [0.35, 0.9], [0.35, 0]], false);
 

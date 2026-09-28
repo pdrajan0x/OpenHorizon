@@ -24,6 +24,7 @@ import { cleanMask, traceLoops, verticalOffset, type CoastLoop } from './outline
 
 const GAP = 300; // m of open sea between neighbouring islands' land
 const PACK_CELL = 100; // m per cell of the packing grid
+const BLOCK_REACH = 6; // m along the road either side of an obstruction, cleared
 const STREAM_MARGIN = 900; // m beyond an island's shore at which it starts streaming in
 
 export interface IslandInfo {
@@ -407,10 +408,21 @@ export class Islands {
         corridors.add([plans[b.plan.a].nodes[b.plan.na], ...b.nodes, plans[b.plan.b].nodes[b.plan.nb]],
           [b.endHalf[0], ...b.halfWidths, b.endHalf[1]].map((h) => h + 1.5));
       }
-      for (const m of maps) m.corridors = corridors;
       console.log(`bridges: ${bridges.bridges.length}`, bridges.bridges.map((b) =>
         `${shaped[b.plan.a].info.id}↔${shaped[b.plan.b].info.id} ${b.length.toFixed(0)} m`).join(', '));
     }
+    // Walls and barriers standing across a road (scripts/road-blocks.mjs: traffic drives through them, the
+    // player can't): a short strip across the road cleared at each, what's drawn and what's solid
+    await Promise.all(maps.map(async (m) => {
+      const blocks = await json<[number, number, number, number, number, number, number][]>(`/mods/maps/${m.id}/blocks.json`);
+      for (const [x, y, z, , dx, dz, half] of blocks ?? []) {
+        const o = m.offset;
+        const a = new THREE.Vector3(x - dx * BLOCK_REACH + o.x, y + o.y, z - dz * BLOCK_REACH + o.z);
+        const b = new THREE.Vector3(x + dx * BLOCK_REACH + o.x, y + o.y, z + dz * BLOCK_REACH + o.z);
+        corridors.add([a, b], half);
+      }
+    }));
+    for (const m of maps) m.corridors = corridors;
     const coast = await Coast.load(world, shaped.map((s, k) => ({
       offset: offsets[k],
       loops: s.loops.map((l) => ({ outer: l.outer, points: l.points.map(([x, z, y]) => [x, z, y] as [number, number, number]) })),
