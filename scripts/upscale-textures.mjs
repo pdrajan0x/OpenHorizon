@@ -194,7 +194,10 @@ for (const id of process.argv.slice(2).filter((a) => !a.startsWith('--'))) {
   const only = process.env.ONLY ? new RegExp(process.env.ONLY, 'i') : null;
   const names = [...new Set(manifest.materials.map((m) => m.diffuse).filter(Boolean))].filter((n) => !done.has(n) && (!only || only.test(n)));
   const jobs = [];
+  // BATCH=<n>: at most n textures this run, saved when done (run again for the next n): a stop loses one batch
+  const batch = Number(process.env.BATCH ?? Infinity);
   for (const name of names) {
+    if (jobs.length >= batch) break;
     const file = `${dir}/tex/${name}.gtx`;
     const kept = `${work}/orig/${name}.gtx`;
     if (!fs.existsSync(file)) continue;
@@ -218,7 +221,7 @@ for (const id of process.argv.slice(2).filter((a) => !a.startsWith('--'))) {
   console.log(`${id}: ${jobs.length} textures to remaster, ${queued} through Real-ESRGAN`);
   if (!jobs.length) continue;
   if (queued) {
-    execFileSync(ESRGAN, ['-i', `${work}/src`, '-o', `${work}/out`, '-n', 'realesrgan-x4plus', '-s', '4', '-f', 'png', '-j', process.env.ESRGAN_THREADS ?? '4:4:4'], {
+    execFileSync(ESRGAN, ['-i', `${work}/src`, '-o', `${work}/out`, '-n', 'realesrgan-x4plus', '-s', '4', '-f', 'png', '-j', process.env.ESRGAN_THREADS ?? '1:2:2'], {
       env: GPU_ENV, cwd: '.', stdio: ['ignore', 'ignore', 'ignore'],
     });
   }
